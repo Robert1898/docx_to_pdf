@@ -1,0 +1,3 @@
+pywin32        # pentru conversie prin Microsoft Word (opțional dacă ai LibreOffice)
+Pillow         # doar pentru make_icon.py
+pyinstaller    # doar pentru a construi .exe-ul
