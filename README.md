@@ -1,18 +1,25 @@
-# Convertor DOCX → PDF
+# Convertor DOCX ⇄ PDF
 
-Aplicație Windows cu interfață grafică (tkinter) care convertește în masă documente Word în PDF.
+Aplicație Windows cu interfață grafică (tkinter) care convertește în masă documente Word în PDF și PDF-uri în DOCX.
 
 ## Funcții
 - Adaugi fișiere sau un întreg folder (se caută recursiv)
-- Formate acceptate: `.docx`, `.doc`, `.rtf`, `.odt`
-- PDF-ul se salvează lângă original sau într-un folder ales
-- Avertizează înainte să suprascrie PDF-uri existente
+- Direcția se alege automat după tipul fișierului:
+  - `.docx`, `.doc`, `.rtf`, `.odt` → `.pdf`
+  - `.pdf` → `.docx`
+- Rezultatul se salvează lângă original sau într-un folder ales
+- Avertizează înainte să suprascrie fișiere existente
 - Bară de progres și raport de erori la final
 
 ## Cerințe
-Pentru conversie ai nevoie de **unul dintre**:
+Pentru Word → PDF ai nevoie de **unul dintre**:
 - Microsoft Word instalat (folosit prioritar, prin `pywin32`)
 - [LibreOffice](https://www.libreoffice.org/) (folosit automat dacă Word lipsește)
+
+Pentru PDF → DOCX e nevoie de **Microsoft Word** (2013 sau mai nou). Calitatea depinde de PDF:
+documentele cu text se convertesc bine, PDF-urile scanate (imagini) nu devin text editabil.
+În timpul conversiei, aplicația dezactivează temporar mesajul lui Word „Word va converti PDF-ul…”
+(opțiunea `DisableConvertPdfWarning`) și o readuce la valoarea inițială la final.
 
 ## Utilizare
 

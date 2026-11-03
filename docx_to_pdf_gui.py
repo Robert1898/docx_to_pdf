@@ -1,7 +1,8 @@
-"""Convertor DOCX -> PDF cu interfata grafica (tkinter).
+"""Convertor DOCX <-> PDF cu interfata grafica (tkinter).
 
+Documentele Word devin PDF, iar PDF-urile devin DOCX.
 Foloseste Microsoft Word (prin pywin32) daca este instalat,
-altfel LibreOffice (soffice) daca il gaseste.
+altfel LibreOffice (soffice) daca il gaseste (doar Word -> PDF).
 """
 
 import os
@@ -14,7 +15,18 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 WORD_PDF_FORMAT = 17
-EXTENSIONS = (".docx", ".doc", ".rtf", ".odt")
+WORD_DOCX_FORMAT = 16
+WORD_EXTENSIONS = (".docx", ".doc", ".rtf", ".odt")
+EXTENSIONS = WORD_EXTENSIONS + (".pdf",)
+PDF_WARNING_VALUE = "DisableConvertPdfWarning"
+
+
+def is_pdf(path):
+    return path.lower().endswith(".pdf")
+
+
+def target_extension(src):
+    return ".docx" if is_pdf(src) else ".pdf"
 
 
 def find_soffice():
@@ -40,6 +52,14 @@ def word_available():
         return False
 
 
+def word_options_key():
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Word.Application\CurVer") as key:
+        major = winreg.QueryValue(key, None).rsplit(".", 1)[1]  # "Word.Application.16"
+    return rf"Software\Microsoft\Office\{major}.0\Word\Options"
+
+
 class WordConverter:
     name = "Microsoft Word"
 
@@ -47,11 +67,42 @@ class WordConverter:
         import pythoncom
         import win32com.client
 
+        # Cand deschide un PDF, Word afiseaza un mesaj de confirmare chiar si invizibil,
+        # ceea ce ar bloca conversia. Il dezactivam temporar si refacem valoarea la final.
+        self._saved_warning = self._set_pdf_warning(1)
         pythoncom.CoInitialize()
-        self.word = win32com.client.DispatchEx("Word.Application")
-        self.word.Visible = False
-        self.word.DisplayAlerts = 0
+        try:
+            self.word = win32com.client.DispatchEx("Word.Application")
+            self.word.Visible = False
+            self.word.DisplayAlerts = 0
+        except Exception:
+            pythoncom.CoUninitialize()
+            self._restore_pdf_warning()
+            raise
         return self
+
+    def _restore_pdf_warning(self):
+        if self._saved_warning != 1:
+            self._set_pdf_warning(self._saved_warning)
+
+    @staticmethod
+    def _set_pdf_warning(value):
+        """Seteaza optiunea si intoarce valoarea anterioara (None daca lipsea)."""
+        import winreg
+
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, word_options_key()) as key:
+                try:
+                    old = winreg.QueryValueEx(key, PDF_WARNING_VALUE)[0]
+                except FileNotFoundError:
+                    old = None
+                if value is None:
+                    winreg.DeleteValue(key, PDF_WARNING_VALUE)
+                else:
+                    winreg.SetValueEx(key, PDF_WARNING_VALUE, 0, winreg.REG_DWORD, value)
+                return old
+        except OSError:
+            return None
 
     def convert(self, src, dst):
         doc = self.word.Documents.Open(
@@ -61,7 +112,10 @@ class WordConverter:
             AddToRecentFiles=False,
         )
         try:
-            doc.ExportAsFixedFormat(os.path.abspath(dst), WORD_PDF_FORMAT)
+            if is_pdf(src):
+                doc.SaveAs2(os.path.abspath(dst), FileFormat=WORD_DOCX_FORMAT)
+            else:
+                doc.ExportAsFixedFormat(os.path.abspath(dst), WORD_PDF_FORMAT)
         finally:
             doc.Close(False)
 
@@ -72,6 +126,7 @@ class WordConverter:
             self.word.Quit()
         finally:
             pythoncom.CoUninitialize()
+            self._restore_pdf_warning()
 
 
 class LibreOfficeConverter:
@@ -84,6 +139,8 @@ class LibreOfficeConverter:
         return self
 
     def convert(self, src, dst):
+        if is_pdf(src):
+            raise RuntimeError("conversia PDF → DOCX necesită Microsoft Word")
         out_dir = os.path.dirname(os.path.abspath(dst))
         subprocess.run(
             [self.soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, src],
@@ -111,7 +168,7 @@ def make_converter():
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Convertor DOCX → PDF")
+        self.title("Convertor DOCX ⇄ PDF")
         self.geometry("680x480")
         self.minsize(560, 400)
         self._set_icon()
@@ -144,7 +201,9 @@ class App(tk.Tk):
         ttk.Button(top, text="Șterge selectate", command=self.remove_selected).pack(side="left")
         ttk.Button(top, text="Golește lista", command=self.clear_files).pack(side="left", padx=5)
 
-        list_frame = ttk.LabelFrame(self, text="Fișiere de convertit")
+        list_frame = ttk.LabelFrame(
+            self, text="Fișiere de convertit (Word → PDF, PDF → DOCX, automat după tip)"
+        )
         list_frame.pack(fill="both", expand=True, **pad)
         self.listbox = tk.Listbox(list_frame, selectmode="extended")
         scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
@@ -156,7 +215,7 @@ class App(tk.Tk):
         out.pack(fill="x", **pad)
         ttk.Checkbutton(
             out,
-            text="Salvează PDF-ul în același folder cu fișierul original",
+            text="Salvează rezultatul în același folder cu fișierul original",
             variable=self.same_folder,
             command=self._update_output_state,
         ).pack(anchor="w", padx=5, pady=(5, 0))
@@ -177,7 +236,7 @@ class App(tk.Tk):
         self.convert_button = ttk.Button(bottom, text="Convertește", command=self.start)
         self.convert_button.pack(side="left", padx=(10, 0))
 
-        self.status = tk.StringVar(value="Adaugă fișiere .docx pentru a începe.")
+        self.status = tk.StringVar(value="Adaugă documente Word sau PDF pentru a începe.")
         ttk.Label(self, textvariable=self.status, anchor="w").pack(fill="x", padx=10, pady=(0, 10))
 
     def _update_output_state(self):
@@ -194,15 +253,21 @@ class App(tk.Tk):
                 continue
             if path not in self.files:
                 self.files.append(path)
-                self.listbox.insert("end", path)
+                arrow = "→ DOCX" if is_pdf(path) else "→ PDF "
+                self.listbox.insert("end", f"[{arrow}]  {path}")
                 added += 1
         self.status.set(f"{len(self.files)} fișier(e) în listă.")
         return added
 
     def add_files(self):
         paths = filedialog.askopenfilenames(
-            title="Alege documente Word",
-            filetypes=[("Documente Word", "*.docx *.doc *.rtf *.odt"), ("Toate fișierele", "*.*")],
+            title="Alege documente Word sau PDF",
+            filetypes=[
+                ("Word și PDF", "*.docx *.doc *.rtf *.odt *.pdf"),
+                ("Documente Word", "*.docx *.doc *.rtf *.odt"),
+                ("PDF", "*.pdf"),
+                ("Toate fișierele", "*.*"),
+            ],
         )
         self._add(paths)
 
@@ -214,7 +279,7 @@ class App(tk.Tk):
         for root, _dirs, names in os.walk(folder):
             paths.extend(os.path.join(root, n) for n in names)
         if self._add(sorted(paths)) == 0:
-            messagebox.showinfo("Niciun fișier", "Nu am găsit documente Word noi în folderul ales.")
+            messagebox.showinfo("Niciun fișier", "Nu am găsit documente Word sau PDF noi în folderul ales.")
 
     def remove_selected(self):
         for index in reversed(self.listbox.curselection()):
@@ -234,13 +299,14 @@ class App(tk.Tk):
 
     def _target_for(self, src):
         folder = os.path.dirname(src) if self.same_folder.get() else self.output_dir.get()
-        return os.path.join(folder, os.path.splitext(os.path.basename(src))[0] + ".pdf")
+        name = os.path.splitext(os.path.basename(src))[0] + target_extension(src)
+        return os.path.join(folder, name)
 
     def start(self):
         if self.worker and self.worker.is_alive():
             return
         if not self.files:
-            messagebox.showwarning("Lipsă fișiere", "Adaugă cel puțin un fișier .docx.")
+            messagebox.showwarning("Lipsă fișiere", "Adaugă cel puțin un document Word sau PDF.")
             return
         if not self.same_folder.get():
             out = self.output_dir.get().strip()
@@ -249,11 +315,19 @@ class App(tk.Tk):
                 return
             os.makedirs(out, exist_ok=True)
 
-        jobs = [(src, self._target_for(src)) for src in self.files]
+        # raport.docx si raport.pdf in aceeasi lista s-ar suprascrie reciproc
+        sources = {os.path.normcase(src) for src in self.files}
+        jobs = []
+        for src in self.files:
+            dst = self._target_for(src)
+            if os.path.normcase(dst) in sources:
+                base, ext = os.path.splitext(dst)
+                dst = f"{base} (convertit){ext}"
+            jobs.append((src, dst))
         existing = [dst for _src, dst in jobs if os.path.exists(dst)]
         if existing and not messagebox.askyesno(
             "Fișiere existente",
-            f"{len(existing)} PDF(-uri) există deja și vor fi suprascrise. Continui?",
+            f"{len(existing)} fișier(e) rezultat există deja și vor fi suprascrise. Continui?",
         ):
             return
 
@@ -310,7 +384,7 @@ class App(tk.Tk):
                 f"{ok} din {total} convertite.\n\nErori:\n" + "\n".join(errors[:15]),
             )
         else:
-            messagebox.showinfo("Gata", f"Toate cele {total} fișier(e) au fost convertite în PDF.")
+            messagebox.showinfo("Gata", f"Toate cele {total} fișier(e) au fost convertite.")
         if self.open_after.get() and ok:
             os.startfile(os.path.dirname(jobs[0][1]))
 
