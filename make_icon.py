@@ -1,91 +1,131 @@
-"""Genereaza icon.ico pentru executabil (document Word -> document PDF)."""
+"""Genereaza icon.ico / icon.png pentru Document Converter.
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+Foaie alba cu colt indoit pe un patrat rotunjit indigo-violet, plus o insigna portocalie cu
+doua sageti circulare (simbolul „conversie”). Pentru 16 si 24 px se deseneaza o varianta
+simplificata (fara randuri de text, insigna mai mare), ca sa ramana lizibila in taskbar.
+"""
+
+import math
+
+from PIL import Image, ImageDraw, ImageFilter
 
 S = 1024  # desenam mare si micsoram pentru margini netede
-FONT = r"C:\Windows\Fonts\segoeuib.ttf"
+INDIGO, VIOLET = (59, 91, 219), (124, 58, 237)
+AMBER, ORANGE = (251, 176, 36), (234, 88, 12)
+SMALL_SIZES = (16, 24)
 
 
-def font(size):
-    return ImageFont.truetype(FONT, size)
-
-
-def vertical_gradient(size, top, bottom):
+def diagonal_gradient(size, start, end):
     w, h = size
-    grad = Image.new("RGBA", (1, h))
+    grad = Image.new("RGBA", size)
+    px = grad.load()
     for y in range(h):
-        t = y / (h - 1)
-        grad.putpixel((0, y), tuple(int(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,))
-    return grad.resize((w, h))
+        for x in range(w):
+            t = (x + y) / (w + h - 2)
+            px[x, y] = (*(int(a + (b - a) * t) for a, b in zip(start, end, strict=True)), 255)
+    return grad
 
 
-def document(size, top, bottom, label, label_size, label_y, lines=True, fold=0.26):
-    """Foaie cu colt indoit, umplere in gradient si o eticheta alba."""
-    w, h = size
-    f = int(w * fold)
-    r = int(w * 0.08)
-    mask = Image.new("L", size, 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle((0, 0, w - 1, h - 1), radius=r, fill=255)
-    md.polygon([(w - f, 0), (w, 0), (w, f)], fill=0)
-
-    doc = Image.new("RGBA", size, (0, 0, 0, 0))
-    doc.paste(vertical_gradient(size, top, bottom), (0, 0), mask)
-    d = ImageDraw.Draw(doc)
-
-    # coltul indoit
-    d.polygon([(w - f, 0), (w - f, f - r // 2), (w - f + r // 2, f), (w, f)],
-              fill=tuple(min(255, c + 70) for c in top) + (255,))
-
-    # randuri de "text", desenate pe un strat separat ca sa se amestece corect
-    if lines:
-        overlay = Image.new("RGBA", size, (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay)
-        lw = int(w * 0.06)
-        for i, frac in enumerate((0.60, 0.72, 0.48)):
-            y = int(h * 0.24) + i * int(h * 0.10)
-            od.rounded_rectangle((int(w * 0.14), y, int(w * (0.14 + frac)), y + lw),
-                                 radius=lw // 2, fill=(255, 255, 255, 120))
-        doc.alpha_composite(overlay)
-
-    fnt = font(label_size)
-    bbox = d.textbbox((0, 0), label, font=fnt)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    d.text(((w - tw) / 2 - bbox[0], h * label_y - th / 2 - bbox[1]), label, font=fnt, fill="white")
-    return doc
-
-
-def paste_with_shadow(canvas, img, pos, offset=(12, 20), blur=24, alpha=120):
-    # umbra se deseneaza pe tot canvasul, ca blur-ul sa nu fie taiat la margini
+def shadow(canvas, mask_img, offset, blur, alpha):
     sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    a = img.getchannel("A").point(lambda v: v * alpha // 255)
-    sh.paste((0, 0, 0, 255), (pos[0] + offset[0], pos[1] + offset[1]), a)
+    a = mask_img.getchannel("A").point(lambda v: v * alpha // 255)
+    sh.paste((15, 15, 40, 255), offset, a)
     canvas.alpha_composite(sh.filter(ImageFilter.GaussianBlur(blur)))
-    canvas.alpha_composite(img, pos)
+
+
+def background(canvas):
+    margin, radius = 40, 230
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((margin, margin, S - margin, S - margin),
+                                           radius=radius, fill=255)
+    tile = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    tile.paste(diagonal_gradient((S, S), INDIGO, VIOLET), (0, 0), mask)
+    # lumina discreta in coltul de sus
+    glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((-300, -420, 760, 420), fill=(255, 255, 255, 40))
+    glow.putalpha(Image.composite(glow.getchannel("A"), Image.new("L", (S, S), 0), mask))
+    tile.alpha_composite(glow.filter(ImageFilter.GaussianBlur(60)))
+    shadow(canvas, tile, (0, 18), 26, 90)
+    canvas.alpha_composite(tile)
+
+
+def page(canvas, simple):
+    x0, y0, x1, y1 = (250, 170, 690, 760) if not simple else (170, 130, 600, 720)
+    w = x1 - x0
+    fold, radius = int(w * 0.30), 44
+    sheet = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    mask = Image.new("L", (S, S), 0)
+    md = ImageDraw.Draw(mask)
+    md.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
+    md.polygon([(x1 - fold, y0 - 2), (x1 + 2, y0 - 2), (x1 + 2, y0 + fold)], fill=0)
+    sheet.paste((255, 255, 255, 255), (0, 0), mask)
+    d = ImageDraw.Draw(sheet)
+    # coltul indoit, in ton cu fundalul
+    d.polygon([(x1 - fold, y0), (x1 - fold, y0 + fold - radius // 2),
+               (x1 - fold + radius // 2, y0 + fold), (x1, y0 + fold)], fill=(199, 210, 254, 255))
+    if not simple:
+        lw = 34
+        for i, frac in enumerate((0.62, 0.74, 0.50, 0.66)):
+            y = y0 + 250 + i * 72
+            d.rounded_rectangle((x0 + 60, y, x0 + 60 + int((w - 120) * frac), y + lw),
+                                radius=lw // 2, fill=(165, 180, 252, 255))
+        d.rounded_rectangle((x0 + 60, y0 + 120, x0 + 60 + int((w - 120) * 0.45), y0 + 170),
+                            radius=25, fill=(99, 102, 241, 255))
+    shadow(canvas, sheet, (0, 16), 22, 110)
+    canvas.alpha_composite(sheet)
+
+
+def arrow_arc(d, cx, cy, r, start, end, width, head):
+    """Arc in sensul acelor de ceasornic (unghiuri PIL) cu varf de sageata la capat.
+
+    In PIL grosimea unui arc creste spre interior, deci desenam conturul la r + width/2
+    ca linia mediana sa fie exact pe raza r, unde e si varful sagetii."""
+    outer = r + width / 2
+    d.arc((cx - outer, cy - outer, cx + outer, cy + outer), start, end, fill="white",
+          width=width)
+    a = math.radians(end)
+    px, py = cx + r * math.cos(a), cy + r * math.sin(a)
+    tx, ty = -math.sin(a), math.cos(a)  # tangenta (sensul arcului)
+    nx, ny = math.cos(a), math.sin(a)  # radial
+    d.polygon([
+        (px + tx * head * 1.1, py + ty * head * 1.1),
+        (px + nx * head, py + ny * head),
+        (px - nx * head, py - ny * head),
+    ], fill="white")
+
+
+def badge(canvas, simple):
+    cx, cy, r = (720, 730, 230) if not simple else (665, 665, 315)
+    disc = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).ellipse((cx - r, cy - r, cx + r, cy + r), fill=255)
+    disc.paste(diagonal_gradient((S, S), AMBER, ORANGE), (0, 0), mask)
+    ring = ImageDraw.Draw(disc)
+    ring.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(255, 255, 255, 255),
+                 width=26 if not simple else 34)
+    ar, width, head = (int(r * 0.50), int(r * 0.15), int(r * 0.20))
+    arrow_arc(ring, cx, cy, ar, 195, 315, width, head)
+    arrow_arc(ring, cx, cy, ar, 15, 135, width, head)
+    shadow(canvas, disc, (0, 14), 20, 120)
+    canvas.alpha_composite(disc)
+
+
+def render(simple=False):
+    canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    background(canvas)
+    page(canvas, simple)
+    badge(canvas, simple)
+    return canvas
 
 
 def main():
-    canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-
-    word = document((500, 640), (66, 133, 244), (24, 78, 190), "W", 280, 0.42, lines=False)
-    pdf = document((560, 700), (244, 81, 72), (190, 30, 45), "PDF", 180, 0.76)
-
-    paste_with_shadow(canvas, word, (50, 30))
-    paste_with_shadow(canvas, pdf, (420, 290))
-
-    # sageata intr-un cerc, de la Word spre PDF
-    cx, cy, cr = 250, 800, 160
-    circle = Image.new("RGBA", (2 * cr, 2 * cr), (0, 0, 0, 0))
-    cd = ImageDraw.Draw(circle)
-    cd.ellipse((0, 0, 2 * cr - 1, 2 * cr - 1), fill="white")
-    cd.ellipse((20, 20, 2 * cr - 21, 2 * cr - 21), fill=(46, 196, 120, 255))
-    shaft, head = 40, 78
-    cd.rounded_rectangle((cr - 95, cr - shaft // 2, cr + 25, cr + shaft // 2), radius=12, fill="white")
-    cd.polygon([(cr + 5, cr - head), (cr + 105, cr), (cr + 5, cr + head)], fill="white")
-    paste_with_shadow(canvas, circle, (cx - cr, cy - cr), offset=(8, 14), blur=18)
-
-    canvas.save("icon.png")
-    canvas.save("icon.ico", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
+    full, small = render(), render(simple=True)
+    full.save("icon.png")
+    frames = [
+        (small if s in SMALL_SIZES else full).resize((s, s), Image.LANCZOS)
+        for s in (16, 24, 32, 48, 64, 128, 256)
+    ]
+    frames[-1].save("icon.ico", sizes=[f.size for f in frames], append_images=frames[:-1])
 
 
 if __name__ == "__main__":
