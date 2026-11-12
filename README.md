@@ -1,7 +1,10 @@
 # Document Converter
 
-Aplicație Windows care convertește în masă documente Office în PDF și PDF-uri în DOCX, plus
-câteva unelte PDF. Totul rulează **local, offline**: documentele nu pleacă de pe calculator.
+Aplicație Windows care convertește în masă documente Office și imagini în PDF, iar PDF-uri în
+DOCX sau Excel, plus unelte PDF (unire, împărțire, compresie, organizare pagini, semnătură, OCR).
+Totul rulează **local, offline**: documentele nu pleacă de pe calculator (singura conexiune la
+internet este verificarea opțională a actualizărilor și descărcarea limbii române pentru OCR).
+Interfața este în română sau engleză.
 
 ## Funcții
 
@@ -13,19 +16,35 @@ câteva unelte PDF. Totul rulează **local, offline**: documentele nu pleacă de
 | Excel: `.xlsx` `.xls` `.xlsm` `.ods` | PDF | Excel sau LibreOffice |
 | PowerPoint: `.pptx` `.ppt` `.pptm` `.odp` | PDF | PowerPoint sau LibreOffice |
 | PDF | DOCX | „Aspect fidel” sau Word (opțional cu OCR pentru PDF-uri scanate) |
+| PDF | Excel (`.xlsx`) | tabelele din rapoarte, cu numere și date ca valori reale (fără Office) |
+| Imagini: `.jpg` `.png` `.bmp` `.gif` `.tif` `.webp` | PDF | încadrate pe A4 sau la mărimea imaginii (fără Office) |
 
 **PDF → DOCX** are trei moduri (opțiunea „PDF → DOCX” din tab-ul Conversie, `--pdf-mode`):
 - **Aspect fidel** (rapoarte, balanțe, jurnale, extrase, tabele): fiecare pagină arată ca în PDF.
   Rândurile și coloanele sunt refăcute din poziția exactă a fiecărui caracter, sumele sunt
   aliniate la dreapta, iar chenarele și liniile drepte sunt păstrate. Textul rămâne editabil, iar
   rândurile copiate în Excel se împart singure pe coloane. Nu are nevoie de Word. Textul ascuns
-  în PDF (de ex. depășirea unei celule din Excel) rămâne ascuns. Imaginile și grafica complexă
-  (logo-uri, grafice) nu sunt transpuse.
+  în PDF (de ex. depășirea unei celule din Excel) rămâne ascuns. Imaginile (logo-uri, ștampile,
+  poze) sunt puse exact în locul lor; grafica vectorială complexă (grafice) nu este transpusă.
 - **Text editabil (Word)**: „PDF Reflow” din Word, potrivit pentru text curgător (scrisori,
   contracte). Pe rapoarte cu multe coloane Word ghicește tabelele și poate muta valori pe alte
   rânduri.
 - **Automat** (implicit): rapoartele pe coloane merg pe aspect fidel, textul curgător și PDF-urile
   scanate prin Word.
+
+**PDF → Excel** (opțiunea „PDF în: Excel”, `--pdf-to xlsx`): pentru rapoarte, jurnale,
+balanțe și extrase. Coloanele sunt găsite după poziția textului pe pagină, antetul repetat pe
+fiecare pagină apare o singură dată, iar textul rupt pe două rânduri e lipit la loc. Sumele
+(`1,234.56`, `1.234,56`, `(1,000.00)` negativ) devin numere, datele (`15.09.2026`, `15-SEP-2026`)
+devin date Excel; codurile cu zero în față și numerele foarte lungi (CNP, IBAN) rămân text.
+
+**Imagini → PDF**: fiecare imagine devine un PDF (TIFF-urile cu mai multe pagini devin un PDF cu
+mai multe pagini). Pentru un singur PDF din mai multe imagini, folosește **Unelte PDF → Unește**.
+
+**Conversii în paralel**: „Conversii simultane” (1–4, `--jobs`) pornește mai multe instanțe Word
+sau Excel pentru loturile mari. Pentru câteva fișiere se folosește una singură, iar Word rămâne
+pornit câteva minute după conversie, ca lotul următor să înceapă imediat. PowerPoint lucrează
+mereu pe rând (Windows permite o singură instanță).
 
 - Opțiuni PDF: semne de carte din titluri, **PDF/A** pentru arhivare, calitate pentru ecran (fișier mai mic)
 - **Excel fără pagini goale**: se tipărește doar conținutul real al fiecărei foi (valori, grafice,
@@ -39,8 +58,10 @@ câteva unelte PDF. Totul rulează **local, offline**: documentele nu pleacă de
   pagină, ca fiecare rând să rămână de recunoscut.
 - Zonele de tipărire, scalarea și rândurile/coloanele repetate setate de tine în Excel sunt
   respectate.
-- Fișiere individuale, foldere întregi (recursiv) sau **drag & drop** din Explorer
-- Tabel cu status pe fiecare fișier; dublu-click deschide rezultatul, click-dreapta oferă mai multe opțiuni
+- Fișiere individuale, foldere întregi (recursiv) sau **drag & drop** din Explorer; ordinea din
+  listă se schimbă trăgând rândurile
+- Tabel cu status pe fiecare fișier, progres și timp estimat (și pe bara de activități);
+  dublu-click deschide rezultatul, click-dreapta oferă mai multe opțiuni
 - Rezultatul se salvează lângă original sau într-un folder ales; nu suprascrie nimic fără să întrebe
 - **Dialogurile ascunse ale lui Office** (de ex. „Ultima dată când ați deschis fișierul a cauzat o
   eroare gravă. Îl deschideți oricum?”) primesc răspuns automat, în loc să blocheze conversia;
@@ -51,8 +72,14 @@ câteva unelte PDF. Totul rulează **local, offline**: documentele nu pleacă de
 - Documentele protejate cu parolă dau eroare imediat, în loc să blocheze conversia
 - Macro-urile din documente nu rulează în timpul conversiei
 
-**Unelte PDF**: unire (în ordinea aleasă), împărțire, protejare cu parolă (AES-256),
-watermark text și **OCR** (transformă PDF-urile scanate în PDF-uri căutabile).
+**Unelte PDF**: unire (în ordinea aleasă, inclusiv cu imagini), împărțire, **compresie**,
+**PDF în imagini** (PNG/JPG, 72–300 DPI), protejare cu parolă (AES-256), watermark text și **OCR**
+(transformă PDF-urile scanate în PDF-uri căutabile). În dreapta listei apare o previzualizare a
+primei pagini din fișierul selectat.
+
+**Compresia** micșorează imaginile mari și le recomprimă (trei niveluri: ușor, echilibrat,
+puternic); textul și fonturile rămân intacte. Dacă rezultatul n-ar fi mai mic, se păstrează
+originalul. Ajută mult la PDF-urile scanate sau cu poze, foarte puțin la cele cu text.
 
 Împărțirea are patru moduri: fiecare pagină separat, **câte N pagini** într-un fișier (600 de
 pagini câte 200 → 3 fișiere), **în N părți egale** sau **intervale alese** (`1-200, 201-450, 451-`;
@@ -67,9 +94,31 @@ cu pagina (pagina 8 din 8), stă în antet/subsol și e la capătul rândului lu
 `8/8`, `8 / 8`, `Pagina 8 din 8`, `Page 8 of 8`, `Pagina 8` și un număr singur în subsol. Numărul
 vechi rămâne în stratul de text de sub petic, deci o căutare în PDF îl mai poate găsi.
 
-**Altele**: temă luminoasă / întunecată / ca sistemul, afișare clară pe ecrane cu scalare
-(125–200%), setări memorate între porniri, notificări la final, jurnal pentru depanare,
-**meniu click-dreapta** și **„Trimite către”** în Explorer, plus o **linie de comandă**.
+**Pagini** (organizator): deschizi un PDF și vezi miniaturile tuturor paginilor. Paginile se pot
+**roti**, **șterge**, **muta** (trăgându-le sau cu săgețile), **extrage** într-un PDF nou și se
+poate pune o **semnătură sau ștampilă** (o imagine PNG, ideal cu fundal transparent) pe o pagină:
+dublu-click pe pagină, apoi tragi dreptunghiul unde să apară. Rezultatul se salvează cu alt nume
+(Ctrl+S); originalul rămâne neatins.
+
+**Folder urmărit** (Setări): fișierele puse într-un folder ales sunt convertite automat, cu
+opțiunile din tab-ul Conversie, în subfolderul `Convertite` (sau altul ales). Un fișier e preluat
+abia după ce s-a terminat de copiat, iar unul deja convertit nu e reluat. Merge cât timp aplicația
+e deschisă, și minimizată; opțiunea „Pornește odată cu Windows” o deschide minimizată la logare.
+
+**Actualizări**: aplicația verifică cel mult o dată pe zi dacă există o versiune nouă în
+[GitHub Releases](https://github.com/Robert1898/docx_to_pdf/releases) și o poate descărca și
+instala din Setări. Verificarea se poate opri. Funcționează doar dacă depozitul și release-urile
+sunt publice.
+
+**Scurtături**: Ctrl+O adaugă fișiere (sau deschide un PDF în Pagini), Ctrl+Shift+O adaugă un
+folder, Ctrl+Enter pornește, Esc anulează, Delete elimină, Ctrl+1…4 schimbă tab-ul, Ctrl+S
+salvează paginile.
+
+**Altele**: interfață în română (implicit) sau engleză, ori după limba Windows, temă luminoasă /
+întunecată / ca sistemul, afișare clară pe ecrane cu scalare (125–200%), setări memorate între
+porniri, notificări la final, jurnal pentru depanare, **meniu click-dreapta** și **„Trimite
+către”** în Explorer (mai multe fișiere selectate deodată ajung în aceeași fereastră, nu câte una
+pentru fiecare), plus o **linie de comandă**.
 
 ## Instalare
 
@@ -96,8 +145,9 @@ Integrarea cu Explorer se activează din tab-ul **Setări**.
 - sau **[LibreOffice](https://www.libreoffice.org/)**: alternativă pentru documente → PDF când Office lipsește.
 - opțional **[Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki)** pentru OCR.
   Pentru diacritice românești, bifează limba *Romanian* la instalarea Tesseract (sau copiază
-  `ron.traineddata` în `C:\Program Files\Tesseract-OCR\tessdata`). Aplicația folosește automat
-  `ron+eng` când sunt disponibile.
+  `ron.traineddata` în `C:\Program Files\Tesseract-OCR\tessdata`), ori apasă **Setări → OCR →
+  Descarcă limba română** (fără drepturi de administrator). Aplicația folosește automat `ron+eng`
+  când sunt disponibile.
 
 Tab-ul **Setări → Componente detectate** arată ce a găsit aplicația.
 
@@ -120,6 +170,12 @@ docconv "D:\Documente" --out "D:\PDF"
 ```bash
 docconv raport.docx buget.xlsx scan.pdf --ocr --pdfa
 ```
+```bash
+docconv jurnal.pdf --pdf-to xlsx
+```
+```bash
+docconv --watch "D:\De convertit" --jobs 3
+```
 
 | Opțiune | Efect |
 |---|---|
@@ -129,9 +185,13 @@ docconv raport.docx buget.xlsx scan.pdf --ocr --pdfa
 | `--screen` | optimizat pentru ecran (fișier mai mic) |
 | `--no-bookmarks` | fără semne de carte din titluri |
 | `--ocr` | OCR pe PDF-urile scanate înainte de conversia în DOCX |
+| `--pdf-to FORMAT` | în ce se convertesc PDF-urile: `docx` (implicit) sau `xlsx` |
 | `--pdf-mode MOD` | PDF → DOCX: `auto` (implicit), `layout` (aspect fidel), `word` |
+| `--image-page MOD` | imagine → PDF: `a4` (implicit) sau `image` (pagina de mărimea imaginii) |
+| `-j, --jobs N` | conversii Office simultane, 1–4 (implicit 2) |
 | `--timeout SEC` | limită de timp per fișier (implicit 180) |
-| `--register-shell` / `--register-sendto` / `--unregister-shell` | integrarea cu Explorer |
+| `--watch FOLDER` | urmărește folderul și convertește fișierele noi până la Ctrl+C (rezultate în `--out` sau `FOLDER\Convertite`) |
+| `--register-shell` / `--register-sendto` / `--unregister-shell` | integrarea cu Explorer (`--unregister-shell` oprește și pornirea cu Windows) |
 
 Cod de ieșire: `0` totul a mers, `1` unele fișiere au eșuat, `2` argumente greșite sau niciun fișier găsit.
 
@@ -166,7 +226,7 @@ python -m venv .venv
 .venv\Scripts\python -m ruff check .
 ```
 ```bash
-.venv\Scripts\python -m pytest -m "not office"
+.venv\Scripts\python -m pytest -m "not office and not ocr"
 ```
 ```bash
 .venv\Scripts\python -m pytest -m office
@@ -195,14 +255,19 @@ convertor/
   engine.py       rulează un lot de conversii (folosit de GUI și CLI)
   office.py       Word / Excel / PowerPoint prin COM, limită de timp, curățenie în registry
   libreoffice.py  alternativa fără Office
-  pdflayout.py    PDF → DOCX cu aspect fidel (rânduri, coloane, chenare)
+  pdflayout.py    PDF → DOCX cu aspect fidel (rânduri, coloane, chenare, imagini)
+  pdftable.py     PDF → Excel (coloane, numere, date)
   excelarea.py    ce se tipărește din fiecare foaie Excel
   pagenumbers.py  renumerotarea paginilor la unire
-  pdftools.py     unire, împărțire, parolă, watermark, OCR
-  shell.py        meniul click-dreapta și „Trimite către”
+  pdftools.py     unire, împărțire, compresie, imagini, parolă, watermark, OCR
+  pageedit.py     organizatorul de pagini și semnătura
+  shell.py        meniul click-dreapta, „Trimite către”, pornirea cu Windows
+  watch.py        folderul urmărit
+  updater.py      actualizări din GitHub Releases
+  i18n.py         traducerea (textele englezești sunt în i18n_en.py)
   settings.py     setări memorate
   cli.py          linia de comandă
-  gui/            interfața (ttkbootstrap + tkinterdnd2)
+  gui/            interfața (ttkbootstrap + tkinterdnd2), instanță unică, progres în taskbar
 tests/            pytest
 installer/        script Inno Setup + traducerea română a installer-ului
 ```

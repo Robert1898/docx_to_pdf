@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # necesar ca să poată crea release-ul
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Venv și dependențe (build.ps1 cere .venv)
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+      - name: Instalez Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Tag-ul trebuie să fie egal cu versiunea din cod
+        shell: pwsh
+        run: |
+          $v = (.venv\Scripts\python.exe -c "import convertor; print(convertor.__version__)").Trim()
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} != v$v din cod" }
+
+      - name: Build (PyInstaller + installer)
+        shell: pwsh
+        run: .\build.ps1 -SkipTests   # testele rulează deja în CI
+
+      - name: Public release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" (Get-ChildItem dist\installer\*.exe) `
+            --title "${{ github.ref_name }}" --generate-notes

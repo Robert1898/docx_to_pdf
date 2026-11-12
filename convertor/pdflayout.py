@@ -13,13 +13,17 @@ DOCX-ul e scris direct (WordprocessingML), fara Word si fara biblioteci suplimen
 from __future__ import annotations
 
 import ctypes
+import logging
 import re
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import cache
+from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
+
+log = logging.getLogger(__name__)
 
 TWIPS = 20  # 1 pt = 20 twips
 LINE_TOLERANCE = 0.35  # cat se pot abate liniile de baza ale aceluiasi rand (x marimea fontului)
@@ -49,7 +53,8 @@ class Segment:
 class Line:
     baseline: float  # distanta de la marginea de sus a paginii
     size: float
-    segments: list[Segment] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)  # grupuri de cuvinte (coloane)
+    words: list[Segment] = field(default_factory=list)  # cuvintele, pentru tabele (Excel)
 
 
 @dataclass
@@ -66,11 +71,22 @@ class Shape:
 
 
 @dataclass
+class Picture:
+    """Imagine din pagina (logo, semnatura scanata, poza), cu pozitia ei."""
+
+    def __init__(self, x0: float, top: float, x1: float, bottom: float, data: bytes,
+                 ext: str) -> None:
+        self.x0, self.top, self.x1, self.bottom = x0, top, x1, bottom
+        self.data, self.ext = data, ext
+
+
+@dataclass
 class Page:
     width: float
     height: float
     lines: list[Line]
     shapes: list[Shape] = field(default_factory=list)
+    pictures: list[Picture] = field(default_factory=list)
 
 
 @dataclass
@@ -185,6 +201,39 @@ def _color(getter: object, obj: object) -> str | None:
     return f"{r.value:02X}{g.value:02X}{b.value:02X}"
 
 
+MIN_PICTURE = 4.0  # pt: imaginile mai mici (puncte, separatori) nu merita transpuse
+
+
+def _pictures(page: object) -> list[Picture]:
+    """Imaginile de pe pagina, randate cu masca lor (transparenta), ca PNG sau JPEG."""
+    import pypdfium2.raw as pdfium_c
+
+    height = page.get_size()[1]  # type: ignore[attr-defined]
+    pictures = []
+    for obj in page.get_objects(max_depth=1):  # type: ignore[attr-defined]
+        if obj.type != pdfium_c.FPDF_PAGEOBJ_IMAGE:
+            continue
+        x0, y0, x1, y1 = obj.get_bounds()
+        if x1 - x0 < MIN_PICTURE or y1 - y0 < MIN_PICTURE:
+            continue
+        try:
+            image = obj.get_bitmap(render=True).to_pil()
+        except Exception as exc:  # format de imagine necunoscut pentru pdfium
+            log.debug("Imagine sarita: %s", exc)
+            continue
+        buf = BytesIO()
+        if image.mode in ("RGBA", "LA") and image.getchannel("A").getextrema() == (255, 255):
+            image = image.convert("RGB")  # canal alfa complet opac: e de fapt o poza
+        if image.mode in ("RGBA", "LA", "P"):
+            image.save(buf, "PNG", optimize=True)
+            ext = "png"
+        else:
+            image.convert("RGB").save(buf, "JPEG", quality=90)
+            ext = "jpeg"
+        pictures.append(Picture(x0, height - y1, x1, height - y0, buf.getvalue(), ext))
+    return pictures
+
+
 def _shapes(page: object) -> list[Shape]:
     """Dreptunghiurile si liniile drepte (orizontale/verticale) ale paginii. Cai complexe
     (grafice, logo-uri vectoriale) nu sunt transpuse."""
@@ -251,6 +300,8 @@ def _axis_aligned(obj: object, bounds: tuple[float, float, float, float],
 
 
 def _lines(chars: list[_Char]) -> list[Line]:
+    """Randurile paginii, fiecare cu segmente (grupuri de cuvinte apropiate = coloane) si
+    cu cuvintele separate (folosite la extragerea tabelelor)."""
     visible = sorted((c for c in chars), key=lambda c: (c.baseline, c.x0))
     groups: list[list[_Char]] = []
     for c in visible:
@@ -268,19 +319,26 @@ def _lines(chars: list[_Char]) -> list[Line]:
         line = Line(baseline=sum(c.baseline for c in group) / len(group),
                     size=max(c.size for c in group))
         current: list[_Char] = []
+        word: list[_Char] = []
         prev: _Char | None = None
         for c in group:
             if prev is not None:
                 gap = c.x0 - prev.x1
+                word_break = prev.space_after or gap > WORD_GAP * c.size
+                if word_break or gap > COLUMN_GAP * c.size:
+                    line.words.append(_segment(word))
+                    word = []
                 if gap > COLUMN_GAP * c.size:
                     line.segments.append(_segment(current))
                     current = []
-                elif prev.space_after or gap > WORD_GAP * c.size:
+                elif word_break:
                     current.append(_Char(" ", prev.x1, c.x0, c.baseline, c.size, c.bold))
             current.append(c)
+            word.append(c)
             prev = c
         if current:
             line.segments.append(_segment(current))
+            line.words.append(_segment(word))
         lines.append(line)
     return lines
 
@@ -333,7 +391,7 @@ def text_width(text: str, path: str | None, size: float) -> float | None:
         return None
 
 
-def read_pages(path: Path, limit: int | None = None) -> list[Page]:
+def read_pages(path: Path, limit: int | None = None, shapes: bool = True) -> list[Page]:
     import pypdfium2 as pdfium
 
     document = pdfium.PdfDocument(str(path))
@@ -343,7 +401,9 @@ def read_pages(path: Path, limit: int | None = None) -> list[Page]:
             page = document[index]
             try:
                 width, height = page.get_size()
-                pages.append(Page(width, height, _lines(_chars(page)), _shapes(page)))
+                pages.append(Page(width, height, _lines(_chars(page)),
+                                  _shapes(page) if shapes else [],
+                                  _pictures(page) if shapes else []))
             finally:
                 page.close()
         return pages
@@ -369,6 +429,8 @@ _CONTENT_TYPES = (
     '<Default Extension="rels" '
     'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
     '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Default Extension="png" ContentType="image/png"/>'
+    '<Default Extension="jpeg" ContentType="image/jpeg"/>'
     '<Override PartName="/word/document.xml" ContentType="application/'
     'vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
     '<Override PartName="/word/styles.xml" ContentType="application/'
@@ -382,18 +444,27 @@ _ROOT_RELS = (
     'relationships/officeDocument" Target="word/document.xml"/>'
     "</Relationships>"
 )
-_DOC_RELS = (
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
-    'relationships/styles" Target="styles.xml"/>'
-    "</Relationships>"
-)
+_IMAGE_REL = ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")
+
+
+def _doc_rels(images: list[str]) -> str:
+    rels = "".join(f'<Relationship Id="rIdImg{i}" Type="{_IMAGE_REL}" Target="{name}"/>'
+                   for i, name in enumerate(images))
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+        f'relationships/styles" Target="styles.xml"/>{rels}</Relationships>'
+    )
+
+
 _W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 _DOC_NS = (
     _W + ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
     ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
     ' xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"'
+    ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
 )
 EMU = 12700  # 1 pt
 _STYLES = (
@@ -530,12 +601,39 @@ def _section(page: Page, margin: float) -> str:
     )
 
 
-def _with_shapes(paragraph: str, shapes: list[Shape], first_id: int) -> str:
-    """Formele paginii se ancoreaza in primul ei paragraf (pozitia lor e fata de pagina)."""
-    if not shapes:
+def _picture_xml(picture: Picture, rel_id: str, shape_id: int) -> str:
+    """Imagine ancorata pe pagina, in spatele textului, exact unde era in PDF."""
+    cx = round((picture.x1 - picture.x0) * EMU)
+    cy = round((picture.bottom - picture.top) * EMU)
+    return (
+        "<w:r><w:drawing>"
+        '<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" '
+        'relativeHeight="2" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">'
+        '<wp:simplePos x="0" y="0"/>'
+        f'<wp:positionH relativeFrom="page"><wp:posOffset>{round(picture.x0 * EMU)}'
+        "</wp:posOffset></wp:positionH>"
+        f'<wp:positionV relativeFrom="page"><wp:posOffset>{round(picture.top * EMU)}'
+        "</wp:posOffset></wp:positionV>"
+        f'<wp:extent cx="{cx}" cy="{cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        f'<wp:wrapNone/><wp:docPr id="{shape_id}" name="Imagine {shape_id}"/>'
+        '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        f'<pic:pic><pic:nvPicPr><pic:cNvPr id="{shape_id}" name="Imagine {shape_id}"/>'
+        "<pic:cNvPicPr/></pic:nvPicPr>"
+        f'<pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch>'
+        "</pic:blipFill>"
+        f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+        "</a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>"
+    )
+
+
+def _with_shapes(paragraph: str, drawings: list[str]) -> str:
+    """Formele si imaginile paginii se ancoreaza in primul ei paragraf (pozitia lor e fata de
+    pagina)."""
+    if not drawings:
         return paragraph
-    drawings = "".join(_shape_xml(s, first_id + i) for i, s in enumerate(shapes))
-    return paragraph.replace("</w:pPr>", "</w:pPr>" + drawings, 1)
+    return paragraph.replace("</w:pPr>", "</w:pPr>" + "".join(drawings), 1)
 
 
 def _page_body(page: Page, first_page: bool, margin: float) -> list[str]:
@@ -570,10 +668,21 @@ def write_docx(pages: list[Page], dst: Path) -> None:
     margin = _margin(pages)
     body: list[str] = []
     shape_id = 1
+    # aceeasi imagine (de ex. logo pe fiecare pagina) e salvata o singura data
+    media: dict[bytes, tuple[str, str]] = {}  # continut -> (fisier, id relatie)
     for index, page in enumerate(pages):
         page_body = _page_body(page, first_page=index == 0, margin=margin)
-        page_body[0] = _with_shapes(page_body[0], page.shapes, shape_id)
-        shape_id += len(page.shapes)
+        drawings = []
+        for picture in page.pictures:
+            if picture.data not in media:
+                media[picture.data] = (f"media/image{len(media) + 1}.{picture.ext}",
+                                       f"rIdImg{len(media)}")
+            drawings.append(_picture_xml(picture, media[picture.data][1], shape_id))
+            shape_id += 1
+        for shape in page.shapes:
+            drawings.append(_shape_xml(shape, shape_id))
+            shape_id += 1
+        page_body[0] = _with_shapes(page_body[0], drawings)
         body.extend(page_body)
         next_page = pages[index + 1] if index + 1 < len(pages) else None
         if next_page is not None and (next_page.width, next_page.height) != (page.width,
@@ -590,9 +699,11 @@ def write_docx(pages: list[Page], dst: Path) -> None:
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _CONTENT_TYPES)
         z.writestr("_rels/.rels", _ROOT_RELS)
-        z.writestr("word/_rels/document.xml.rels", _DOC_RELS)
+        z.writestr("word/_rels/document.xml.rels", _doc_rels([n for n, _r in media.values()]))
         z.writestr("word/styles.xml", _STYLES)
         z.writestr("word/document.xml", document)
+        for data, (name, _rel) in media.items():
+            z.writestr(f"word/{name}", data)
     tmp.replace(dst)
 
 

@@ -8,12 +8,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from .i18n import _
+
 
 class Kind(Enum):
     WORD = "word"
     EXCEL = "excel"
     POWERPOINT = "powerpoint"
     PDF = "pdf"
+    IMAGE = "image"
 
 
 EXTENSIONS: dict[Kind, tuple[str, ...]] = {
@@ -21,15 +24,12 @@ EXTENSIONS: dict[Kind, tuple[str, ...]] = {
     Kind.EXCEL: (".xlsx", ".xls", ".xlsm", ".ods"),
     Kind.POWERPOINT: (".pptx", ".ppt", ".pptm", ".odp"),
     Kind.PDF: (".pdf",),
+    Kind.IMAGE: (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp"),
 }
 SUPPORTED: tuple[str, ...] = tuple(ext for exts in EXTENSIONS.values() for ext in exts)
 
-LABELS = {
-    Kind.WORD: "Word → PDF",
-    Kind.EXCEL: "Excel → PDF",
-    Kind.POWERPOINT: "PowerPoint → PDF",
-    Kind.PDF: "PDF → DOCX",
-}
+PDF_TARGETS = {"docx": ".docx", "xlsx": ".xlsx"}
+PDF_MODES = ("auto", "layout", "word")
 
 COLLISION_SUFFIX = "convertit"
 
@@ -42,8 +42,18 @@ def kind_of(path: str | os.PathLike[str]) -> Kind | None:
     return None
 
 
-def target_extension(kind: Kind) -> str:
-    return ".docx" if kind is Kind.PDF else ".pdf"
+def target_extension(kind: Kind, pdf_target: str = "docx") -> str:
+    if kind is Kind.PDF:
+        return PDF_TARGETS.get(pdf_target, ".docx")
+    return ".pdf"
+
+
+def label(kind: Kind, pdf_target: str = "docx") -> str:
+    """Textul din coloana „Conversie”: „Word → PDF”, „PDF → Excel”..."""
+    source = {Kind.WORD: "Word", Kind.EXCEL: "Excel", Kind.POWERPOINT: "PowerPoint",
+              Kind.PDF: "PDF", Kind.IMAGE: _("Imagine")}[kind]
+    target = ("Excel" if pdf_target == "xlsx" else "DOCX") if kind is Kind.PDF else "PDF"
+    return f"{source} → {target}"
 
 
 def is_candidate(path: Path) -> bool:
@@ -56,12 +66,12 @@ class ExportOptions:
     bookmarks: bool = True  # semne de carte din titluri (Word)
     pdfa: bool = False  # PDF/A-1 pentru arhivare
     for_screen: bool = False  # calitate redusa, fisier mai mic
-    ocr: bool = False  # OCR pe PDF-urile scanate inainte de conversia in DOCX
+    ocr: bool = False  # OCR pe PDF-urile scanate inainte de conversia in DOCX/Excel
     timeout: int = 180  # secunde per fisier
     pdf_mode: str = "auto"  # PDF -> DOCX: auto / layout (aspect fidel) / word (text curgator)
-
-
-PDF_MODES = ("auto", "layout", "word")
+    pdf_target: str = "docx"  # PDF -> docx sau xlsx
+    workers: int = 2  # conversii simultane
+    image_page: str = "a4"  # imagine -> PDF: a4 (incadrata) sau image (marimea imaginii)
 
 
 @dataclass
@@ -72,7 +82,7 @@ class Job:
     label: str = field(init=False)
 
     def __post_init__(self) -> None:
-        self.label = LABELS[self.kind]
+        self.label = label(self.kind, "xlsx" if self.dst.suffix.lower() == ".xlsx" else "docx")
 
 
 def collect_files(paths: Iterable[str | os.PathLike[str]]) -> list[Path]:
@@ -118,7 +128,8 @@ def _unique(dst: Path, taken: set[str]) -> Path:
         n += 1
 
 
-def plan_jobs(files: Iterable[Path], out_dir: Path | None = None) -> list[Job]:
+def plan_jobs(files: Iterable[Path], out_dir: Path | None = None,
+              pdf_target: str = "docx") -> list[Job]:
     """Stabileste fisierul rezultat pentru fiecare sursa.
 
     Un rezultat nu are voie sa suprascrie o alta sursa din lista (raport.docx + raport.pdf)
@@ -132,7 +143,7 @@ def plan_jobs(files: Iterable[Path], out_dir: Path | None = None) -> list[Job]:
         if kind is None:
             continue
         folder = out_dir if out_dir is not None else src.parent
-        dst = _unique(folder / (src.stem + target_extension(kind)), taken)
+        dst = _unique(folder / (src.stem + target_extension(kind, pdf_target)), taken)
         taken.add(os.path.normcase(str(dst)))
         jobs.append(Job(src, dst, kind))
     return jobs

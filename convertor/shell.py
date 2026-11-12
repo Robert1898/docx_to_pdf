@@ -113,6 +113,29 @@ def sendto_registered() -> bool:
     return sendto_path().exists()
 
 
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def set_autostart(enabled: bool) -> None:
+    """Pornire minimizata la logarea in Windows (util pentru folderul urmarit)."""
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+        if enabled:
+            command = subprocess.list2cmdline([*gui_command(), "--minimized"])
+            winreg.SetValueEx(key, MENU_KEY, 0, winreg.REG_SZ, command)
+        else:
+            with contextlib.suppress(FileNotFoundError):
+                winreg.DeleteValue(key, MENU_KEY)
+
+
+def autostart_enabled() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, MENU_KEY)
+        return True
+    except OSError:
+        return False
+
+
 def migrate_legacy() -> None:
     """Integrarile activate sub numele vechi („Convertor DOCX-PDF”) sunt mutate pe cel nou."""
     try:

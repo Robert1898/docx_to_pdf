@@ -13,6 +13,15 @@ def isolated_appdata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
 
 
+@pytest.fixture(autouse=True)
+def romanian(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mesajele verificate de teste sunt in romana, indiferent de limba Windows-ului (CI)."""
+    from convertor import i18n
+
+    monkeypatch.setattr(i18n, "system_language", lambda: "ro")
+    i18n.set_language("ro")
+
+
 def make_pdf(path: Path, pages: list[str]) -> Path:
     c = canvas.Canvas(str(path))
     for text in pages:
