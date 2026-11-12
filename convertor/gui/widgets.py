@@ -67,6 +67,21 @@ def tooltip(widget: tk.Misc, text: str) -> None:
         log.debug("ToolTip: %s", exc)
 
 
+def icon_button(master: tk.Misc, text: str, command: Callable[[], object], bootstyle: str,
+                glyph: str | None = None, mirror: bool = False, **kwargs: object) -> ttk.Button:
+    """Buton cu iconita in stanga textului (alba pe butoanele pline, gri pe cele conturate)."""
+    from .icons import icon
+
+    image = None
+    if glyph:
+        color = "#5f6b7a" if "outline" in bootstyle or "link" in bootstyle else "#ffffff"
+        image = icon(glyph, color=color, mirror=mirror)
+    button = ttk.Button(master, text=text, command=command, bootstyle=bootstyle, **kwargs)
+    if image is not None:
+        button.configure(image=image, compound=tk.LEFT)
+    return button
+
+
 @dataclass(frozen=True)
 class Column:
     key: str
@@ -85,8 +100,12 @@ class FileTable(ttk.Frame):
         placeholder: str,
         on_drop: Callable[[Sequence[str]], object] | None = None,
         on_activate: Callable[[str], None] | None = None,
+        reorderable: bool = False,
+        on_reorder: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
+        self._drag_rows: list[str] = []
+        self._on_reorder = on_reorder
         self.columns = columns
         self.tree = ttk.Treeview(
             self, columns=[c.key for c in columns], show="headings", selectmode="extended"
@@ -115,7 +134,36 @@ class FileTable(ttk.Frame):
             self.tree.bind("<Double-1>", lambda e: self._activate(e, on_activate))
             self.tree.bind("<Return>", lambda e: self._activate(e, on_activate))
         self.tree.bind("<Control-a>", lambda e: self.tree.selection_set(self.tree.get_children()))
+        if reorderable:
+            # randurile selectate se pot muta tragandu-le cu mouse-ul
+            self.tree.bind("<ButtonPress-1>", self._drag_start, add="+")
+            self.tree.bind("<B1-Motion>", self._drag_motion, add="+")
+            self.tree.bind("<ButtonRelease-1>", self._drag_end, add="+")
         self._refresh_placeholder()
+
+    def _drag_start(self, event: tk.Event) -> None:
+        row = self.tree.identify_row(event.y)
+        selected = self.selection()
+        self._drag_rows = selected if row in selected else ([row] if row else [])
+
+    def _drag_motion(self, event: tk.Event) -> None:
+        if not self._drag_rows:
+            return
+        target = self.tree.identify_row(event.y)
+        if not target or target in self._drag_rows:
+            return
+        rows = self.order()
+        index = rows.index(target)
+        for row in self._drag_rows:
+            self.tree.move(row, "", index)
+        self.tree.selection_set(self._drag_rows)
+        self.tree.configure(cursor="fleur")
+
+    def _drag_end(self, _event: tk.Event) -> None:
+        if self._drag_rows and self.tree.cget("cursor") == "fleur" and self._on_reorder:
+            self._on_reorder()
+        self._drag_rows = []
+        self.tree.configure(cursor="")
 
     def _activate(self, event: tk.Event, callback: Callable[[str], None]) -> None:
         iid = self.tree.identify_row(event.y) if event.type == tk.EventType.ButtonPress else (

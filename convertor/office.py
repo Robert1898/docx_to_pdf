@@ -21,6 +21,7 @@ from typing import Any
 
 from . import excelarea
 from .core import ExportOptions, Job, Kind
+from .i18n import _
 from .paths import state_dir
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,9 @@ PP_SAVE_AS_PDF = 32
 PP_ALERTS_NONE = 1
 
 # coduri HRESULT care inseamna ca procesul Office a murit sau nu mai raspunde
+OFFICE_DIED = "Aplicația Office s-a închis neașteptat."
+POWERPOINT_LOCK = threading.Lock()
+
 DEAD_SERVER_CODES = {
     -2147023174,  # RPC_S_SERVER_UNAVAILABLE
     -2147023170,  # RPC_S_CALL_FAILED
@@ -75,9 +79,9 @@ def describe_error(exc: BaseException) -> str:
         detail = (excepinfo[2] if excepinfo and excepinfo[2] else message) or str(exc)
         low = detail.lower()
         if "password" in low or "parol" in low:
-            return "Documentul este protejat cu parolă."
+            return _("Documentul este protejat cu parolă.")
         if hresult in DEAD_SERVER_CODES or (excepinfo and excepinfo[5] in DEAD_SERVER_CODES):
-            return "Aplicația Office s-a închis neașteptat."
+            return _(OFFICE_DIED)
         return " ".join(detail.split())
     return str(exc) or exc.__class__.__name__
 
@@ -93,6 +97,9 @@ class PdfWarningGuard:
     """
 
     VALUE = "DisableConvertPdfWarning"
+    # mai multe instante Word pot lucra in paralel: optiunea se reface abia dupa ultima
+    _users = 0
+    _lock = threading.RLock()
 
     @staticmethod
     def _marker() -> Path:
@@ -106,6 +113,23 @@ class PdfWarningGuard:
 
     @classmethod
     def suppress(cls) -> None:
+        with cls._lock:
+            cls._users += 1
+            if cls._users == 1:
+                cls._suppress()
+
+    @classmethod
+    def restore(cls) -> None:
+        """Apelat la inchiderea unei instante Word si la pornirea aplicatiei (dupa un crash)."""
+        with cls._lock:
+            if cls._users > 0:
+                cls._users -= 1
+                if cls._users > 0:
+                    return
+            cls._restore()
+
+    @classmethod
+    def _suppress(cls) -> None:
         try:
             key_path = cls._options_key()
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
@@ -121,7 +145,7 @@ class PdfWarningGuard:
             log.warning("Nu am putut dezactiva mesajul PDF al lui Word: %s", exc)
 
     @classmethod
-    def restore(cls) -> None:
+    def _restore(cls) -> None:
         marker = cls._marker()
         try:
             data = json.loads(marker.read_text())
@@ -162,6 +186,7 @@ class ResiliencyCleaner:
     VALUE_KEYS = ("StartupItems", "DisabledItems")
     RECOVERY_KEY = "DocumentRecovery"
     CRASH_VALUE = "PotentialDataLossInfo2"
+    _lock = threading.RLock()  # mai multe fire Word pot scrie lista in acelasi timp
 
     @staticmethod
     def _list_file() -> Path:
@@ -185,9 +210,10 @@ class ResiliencyCleaner:
 
     @classmethod
     def remember(cls, path: Path) -> None:
-        paths = cls._load()
-        if str(path) not in paths:
-            cls._store([*paths, str(path)])
+        with cls._lock:
+            paths = cls._load()
+            if str(path) not in paths:
+                cls._store([*paths, str(path)])
 
     @staticmethod
     def mentions(data: object, wanted: set[str]) -> bool:
@@ -228,6 +254,11 @@ class ResiliencyCleaner:
 
     @classmethod
     def clean(cls) -> None:
+        with cls._lock:
+            cls._clean()
+
+    @classmethod
+    def _clean(cls) -> None:
         paths = cls._load()
         if not paths:
             return
@@ -473,14 +504,27 @@ class WordApp(OfficeApp):
     progid = "Word.Application"
     image = "WINWORD.EXE"
     name = "Microsoft Word"
+    # optiunea din registry e „imprumutata” o singura data per instanta, chiar daca Word e
+    # repornit dupa un timeout; se elibereaza la quit()
+    _guarded = False
+
+    def _guard(self) -> None:
+        if not self._guarded:
+            PdfWarningGuard.suppress()
+            self._guarded = True
+
+    def _unguard(self) -> None:
+        if self._guarded:
+            self._guarded = False
+            PdfWarningGuard.restore()
 
     def start(self) -> None:
-        PdfWarningGuard.suppress()
+        self._guard()
         ResiliencyCleaner.clean()  # inainte ca Word sa-si incarce lista la pornire
         try:
             super().start()
         except Exception:
-            PdfWarningGuard.restore()
+            self._unguard()
             raise
         # dupa un timeout, Word tocmai a marcat fisierul la care l-am oprit
         ResiliencyCleaner.clean()
@@ -494,7 +538,7 @@ class WordApp(OfficeApp):
         try:
             super().quit()
         finally:
-            PdfWarningGuard.restore()
+            self._unguard()
             ResiliencyCleaner.clean()
 
     def convert(self, job: Job, options: ExportOptions, src: Path) -> None:
@@ -551,7 +595,7 @@ def _find_content(ws: Any, order: int, direction: int) -> Any:
     if found is None:
         return None
     first = found.Address
-    for _ in range(MAX_WHITESPACE_SKIPS):
+    for _attempt in range(MAX_WHITESPACE_SKIPS):
         if str(found.Text).strip():
             return found
         found = cells.FindPrevious(found) if direction == XL_PREVIOUS else cells.FindNext(found)
@@ -846,7 +890,14 @@ class OfficeSession:
 
     def convert(self, job: Job, options: ExportOptions, src: Path | None = None) -> str:
         """Converteste un fisier. Intoarce o nota (de ex. dialogurile la care am raspuns)."""
-        app = self._app(OFFICE_FOR_KIND[job.kind])
+        cls = OFFICE_FOR_KIND[job.kind]
+        # PowerPoint are o singura instanta pe calculator: firele paralele il folosesc pe rand
+        with POWERPOINT_LOCK if cls is PowerPointApp else contextlib.nullcontext():
+            return self._convert(cls, job, options, src)
+
+    def _convert(self, cls: type[OfficeApp], job: Job, options: ExportOptions,
+                 src: Path | None) -> str:
+        app = self._app(cls)
         opened = src or job.src
         timer: threading.Timer | None = None
         watcher: DialogWatcher | None = None
@@ -862,15 +913,16 @@ class OfficeSession:
             timer.start()
             app.convert(job, options, opened)
         except Exception as exc:
-            dialog = f" Dialog: „{watcher.answers[-1]}”" if watcher and watcher.answers else ""
+            dialog = (" " + _("Dialog: „{text}”").format(text=watcher.answers[-1])
+                      if watcher and watcher.answers else "")
             if app.timed_out:
                 app.reset()
                 raise ConversionTimeout(
-                    f"A depășit limita de {options.timeout} s; {app.name} a fost oprit și va "
-                    f"fi repornit.{dialog}"
+                    _("A depășit limita de {seconds} s; {app} a fost oprit și va fi repornit.")
+                    .format(seconds=options.timeout, app=app.name) + dialog
                 ) from exc
             message = describe_error(exc)
-            if message == "Aplicația Office s-a închis neașteptat.":
+            if message == _(OFFICE_DIED):
                 app.reset()
             raise ConversionError(message + dialog) from exc
         finally:
@@ -881,7 +933,8 @@ class OfficeSession:
             with self._lock:
                 self._current = None
         if watcher and watcher.answers:
-            return f"am răspuns automat la {len(watcher.answers)} dialog(uri) {app.name}"
+            return _("am răspuns automat la {count} dialog(uri) {app}").format(
+                count=len(watcher.answers), app=app.name)
         return ""
 
     @staticmethod

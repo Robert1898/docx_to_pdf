@@ -45,13 +45,27 @@ def version_info(name, description):
 
 
 dnd_datas, dnd_binaries, dnd_hidden = collect_all("tkinterdnd2")
+# Pachetele mari sunt puse o singura data in _internal (ca .pyc), partajate de ambele exe-uri;
+# altfel fiecare exe si-ar avea propria copie in arhiva lui (~6 MB in plus).
+SHARED = ["convertor", "reportlab", "pypdf", "PIL", "pypdfium2", "pypdfium2_raw", "ttkbootstrap",
+          "tkinterdnd2", "win32com", "Crypto"]
 common = dict(
     pathex=[str(ROOT)],
     binaries=dnd_binaries,
     datas=[("icon.ico", "."), *dnd_datas, *collect_data_files("ttkbootstrap")],
-    hiddenimports=[*dnd_hidden, "win32com.client", "win32com.shell", "pythoncom", "pywintypes"],
-    # AVIF nu e folosit nicaieri si ar adauga ~7 MB
-    excludes=["pytest", "ruff", "PIL._avif", "PIL.AvifImagePlugin"],
+    hiddenimports=[*dnd_hidden, "win32com.client", "win32com.shell", "pythoncom", "pywintypes",
+                   "convertor.i18n_en"],
+    module_collection_mode={name: "pyc" for name in SHARED},
+    excludes=[
+        "pytest", "ruff", "PyInstaller",
+        # trase de unele hook-uri, dar nefolosite: ~2 MB per exe
+        "setuptools", "pkg_resources", "packaging", "_distutils_hack",
+        "asyncio", "unittest", "pydoc", "lib2to3", "xmlrpc", "test",
+        # AVIF nu e folosit nicaieri si ar adauga ~7 MB
+        "PIL._avif", "PIL.AvifImagePlugin",
+        # inlocuit de pycryptodome
+        "cryptography",
+    ],
 )
 a_gui = Analysis(["run_gui.py"], **common)
 a_cli = Analysis(["run_cli.py"], **common)
