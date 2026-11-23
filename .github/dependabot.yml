@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # actiunile sunt fixate pe SHA; Dependabot actualizeaza si SHA-ul, si comentariul cu versiunea
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # intervalele din requirements.txt / requirements-dev.txt; requirements.lock se regenereaza
+  # manual (vezi README, „Dependențe fixate”)
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]

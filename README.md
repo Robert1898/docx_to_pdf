@@ -214,6 +214,7 @@ Cod de ieșire: `0` totul a mers, `1` unele fișiere au eșuat, `2` argumente gr
 
 ## Dezvoltare
 
+Necesită Python 3.11 sau mai nou (release-ul se construiește cu 3.12).
 ```bash
 python -m venv .venv
 ```
@@ -250,6 +251,35 @@ Certificate Store) sau `SIGN_PFX` + `SIGN_PFX_PASSWORD` înainte de `build.ps1`;
 și installer-ul se semnează cu `signtool` (Windows SDK) și marcaj de timp. Fără ele, pasul e sărit.
 
 Versiunea se schimbă într-un singur loc: `convertor/__init__.py`.
+
+### Dependențe fixate (`requirements.lock`)
+`requirements.txt` și `requirements-dev.txt` conțin intervale (`>=`), folosite pentru dezvoltare și
+de CI, care rulează testele pe Python 3.11–3.14 cu cele mai noi versiuni permise. Release-ul se
+construiește însă din `requirements.lock`: versiuni exacte, cu hash-uri SHA-256, instalate cu
+`pip install --require-hashes`, ca fiecare installer publicat să fie reproductibil. Lock-ul e
+generat pe Windows cu Python 3.12, versiunea folosită de release.
+
+Se regenerează după ce schimbi `requirements*.txt` sau ca să iei versiuni noi (Dependabot actualizează
+acțiunile și intervalele, dar nu și lock-ul):
+```bash
+.venv\Scripts\python -m pip install pip-tools
+```
+```bash
+.venv\Scripts\python -m piptools compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url --upgrade --output-file requirements.lock requirements-dev.txt
+```
+Fără `--upgrade` păstrează versiunile existente și adaugă doar ce lipsește. Verifică apoi într-un
+venv nou: `pip install --require-hashes -r requirements.lock`, ruff și testele rapide.
+
+### CI/CD
+- `ci.yml` (la push pe `main` și la pull request): ruff și testele rapide pe Python 3.11–3.14;
+  raportul de acoperire (`coverage.xml`) e salvat ca artefact pentru fiecare versiune.
+- `release.yml` (la un tag `v*`): întâi job-ul `test` (ruff și testele rapide, din lock), apoi
+  build-ul, `SHA256SUMS.txt` și publicarea release-ului. Tag-ul trebuie să fie egal cu versiunea
+  din cod. Inno Setup are versiunea fixată (`choco install innosetup --version 6.7.1`); o versiune
+  nouă se schimbă manual în `release.yml`.
+- Toate acțiunile sunt fixate pe SHA-ul unui commit (versiunea e în comentariu);
+  `.github/dependabot.yml` propune săptămânal actualizări pentru acțiuni și dependențele pip.
+- Testele rapide folosesc peste tot aceiași markeri: `-m "not office and not ocr"`.
 
 ### Structura
 ```

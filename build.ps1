@@ -76,7 +76,8 @@ Write-Host "$appName v$version" -ForegroundColor Green
 
 if (-not $SkipTests) {
     Invoke-Step 'ruff' { & $py -m ruff check . }
-    Invoke-Step 'teste rapide' { & $py -m pytest -m "not office" -q }
+    # aceiasi markeri ca in CI (ci.yml, release.yml): fara Office real si fara Tesseract
+    Invoke-Step 'teste rapide' { & $py -m pytest -m "not office and not ocr" -q }
 }
 
 Invoke-Step 'PyInstaller' { & $py -m PyInstaller --noconfirm --clean document-converter.spec }
