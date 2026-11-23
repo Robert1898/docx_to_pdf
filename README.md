@@ -108,7 +108,10 @@ e deschisă, și minimizată; opțiunea „Pornește odată cu Windows” o desc
 **Actualizări**: aplicația verifică cel mult o dată pe zi dacă există o versiune nouă în
 [GitHub Releases](https://github.com/Robert1898/docx_to_pdf/releases) și o poate descărca și
 instala din Setări. Verificarea se poate opri. Funcționează doar dacă depozitul și release-urile
-sunt publice.
+sunt publice. Installer-ul descărcat e pornit doar dacă hash-ul lui SHA-256 se potrivește cu
+`SHA256SUMS.txt` din același release, iar descărcarea merge doar pe https, la domeniile GitHub.
+Un release fără `SHA256SUMS.txt` nu se instalează automat: aplicația oferă doar linkul spre pagina
+lui.
 
 **Scurtături**: Ctrl+O adaugă fișiere (sau deschide un PDF în Pagini), Ctrl+Shift+O adaugă un
 folder, Ctrl+Enter pornește, Esc anulează, Delete elimină, Ctrl+1…4 schimbă tab-ul, Ctrl+S

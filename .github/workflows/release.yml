@@ -37,10 +37,21 @@ jobs:
         shell: pwsh
         run: .\build.ps1 -SkipTests   # testele rulează deja în CI
 
+      - name: Sume de control (SHA256SUMS.txt, verificat de actualizarea din aplicatie)
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem dist\installer\*.exe | ForEach-Object {
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          }
+          if (-not $lines) { throw "Nu am gasit installer-ul in dist\installer" }
+          [IO.File]::WriteAllText("dist\installer\SHA256SUMS.txt", (($lines -join "`n") + "`n"))
+          Get-Content dist\installer\SHA256SUMS.txt
+
       - name: Public release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" (Get-ChildItem dist\installer\*.exe) `
+            dist\installer\SHA256SUMS.txt `
             --title "${{ github.ref_name }}" --generate-notes

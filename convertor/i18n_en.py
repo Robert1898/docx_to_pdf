@@ -485,4 +485,19 @@ EN: dict[str, str] = {
         "Download version {v} and start the installer? The application will close.",
     "Descarc… {p}%": "Downloading… {p}%",
     "Descărcarea a eșuat: {error}": "The download failed: {error}",
+    # --- actualizari verificate -------------------------------------------------------------
+    "Deschide pagina release-ului": "Open the release page",
+    "Versiune nouă: {v}. Release-ul nu poate fi verificat, așa că nu îl instalez "
+    "automat; descarcă-l de pe pagina lui.":
+        "New version: {v}. The release cannot be verified, so it will not be installed "
+        "automatically; download it from its page.",
+    "Adresă de descărcare nepermisă: {host}": "Download address not allowed: {host}",
+    "Release-ul nu are {file}; actualizarea automată nu e sigură.":
+        "The release has no {file}; the automatic update is not safe.",
+    "Nu am putut descărca {file}: {error}": "Could not download {file}: {error}",
+    "{file} este prea mare.": "{file} is too large.",
+    "{file} nu conține installer-ul {name}.": "{file} does not list the installer {name}.",
+    "Descărcare incompletă.": "Incomplete download.",
+    "Installer-ul descărcat nu se potrivește cu suma de control din release; l-am șters.":
+        "The downloaded installer does not match the checksum in the release; it was deleted.",
 }
