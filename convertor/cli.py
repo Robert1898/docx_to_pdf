@@ -98,7 +98,7 @@ def _report(result: Result) -> None:
 
 
 def _watch(args: argparse.Namespace, options: ExportOptions) -> int:
-    from .watch import FolderWatcher, default_output
+    from .watch import MAX_RETRIES, FolderWatcher, default_output
 
     folder_in = args.watch.resolve()
     if not folder_in.is_dir():
@@ -109,10 +109,15 @@ def _watch(args: argparse.Namespace, options: ExportOptions) -> int:
     pool = OfficePool(options.workers)
 
     def convert(jobs: list[Job]) -> list[Result]:
+        # rezultatele decid ce fisiere sunt marcate ca facute si ce se reincearca
         return Engine(options, listener=_report, pool=pool).run(jobs)
 
+    def gave_up(path: Path, error: str) -> None:
+        print(_("„{name}” nu a putut fi convertit după {count} încercări: {error}").format(
+            name=path.name, count=MAX_RETRIES + 1, error=error), file=sys.stderr, flush=True)
+
     watcher = FolderWatcher(folder_in, folder_out, convert, interval=3,
-                            pdf_target=lambda: options.pdf_target)
+                            pdf_target=lambda: options.pdf_target, on_give_up=gave_up)
     watcher.start()
     print(_("Urmăresc {folder} → {out}. Ctrl+C oprește.").format(folder=folder_in,
                                                                  out=folder_out), flush=True)

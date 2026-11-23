@@ -23,7 +23,7 @@ from ..engine import Backends, Engine, OfficePool, Result, Status
 from ..i18n import _
 from ..log import setup_logging
 from ..paths import resource_path
-from ..watch import FolderWatcher, default_output
+from ..watch import MAX_RETRIES, FolderWatcher, default_output
 from .convert_tab import ConvertTab
 from .instance import InstanceServer
 from .pages_tab import PagesTab
@@ -238,12 +238,13 @@ class App:
         folder_in = Path(s.watch_in)
         folder_out = Path(s.watch_out) if s.watch_out else default_output(folder_in)
         self.watcher = FolderWatcher(folder_in, folder_out, self._watch_convert,
-                                     pdf_target=lambda: self.settings.pdf_target)
+                                     pdf_target=lambda: self.settings.pdf_target,
+                                     on_give_up=self._watch_gave_up)
         self.watcher.start()
         self.settings_tab.watch_info(_("Urmăresc „{folder}”.").format(folder=folder_in))
 
     def _watch_convert(self, jobs: list[Job]) -> list[Result]:
-        """Ruleaza in firul de urmarire."""
+        """Ruleaza in firul de urmarire; rezultatele decid ce fisiere sunt reincercate."""
         options = self.settings.export_options()
         engine = Engine(options, backends=self.backends, pool=self.pool(options.workers))
         results = engine.run(jobs)
@@ -251,9 +252,19 @@ class App:
         failed = sum(r.status is Status.FAILED for r in results)
         text = _("{done} convertite, {failed} eșuate din folderul urmărit.").format(
             done=done, failed=failed)
+        if failed:
+            text += " " + _("Cele eșuate sunt reîncercate de cel mult {count} ori.").format(
+                count=MAX_RETRIES)
         self.ui.post(lambda: (self.settings_tab.watch_info(text),
                               self.notify(_("Folder urmărit"), text)))
         return results
+
+    def _watch_gave_up(self, path: Path, error: str) -> None:
+        """Ruleaza in firul de urmarire, cand un fisier a esuat la toate incercarile."""
+        text = _("„{name}” nu a putut fi convertit după {count} încercări: {error}").format(
+            name=path.name, count=MAX_RETRIES + 1, error=error)
+        self.ui.post(lambda: (self.settings_tab.watch_info(text),
+                              self.notify(_("Folder urmărit"), text)))
 
     # --- setari si inchidere --------------------------------------------------------------
 

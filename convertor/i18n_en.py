@@ -500,4 +500,9 @@ EN: dict[str, str] = {
     "Descărcare incompletă.": "Incomplete download.",
     "Installer-ul descărcat nu se potrivește cu suma de control din release; l-am șters.":
         "The downloaded installer does not match the checksum in the release; it was deleted.",
+    # --- folder urmarit: reincercari ---------------------------------------------------------
+    "Cele eșuate sunt reîncercate de cel mult {count} ori.":
+        "Failed files are retried up to {count} times.",
+    "„{name}” nu a putut fi convertit după {count} încercări: {error}":
+        "“{name}” could not be converted after {count} attempts: {error}",
 }
