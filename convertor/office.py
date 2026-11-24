@@ -328,6 +328,45 @@ def _kill(pid: int) -> None:
         log.debug("Procesul %s nu mai exista: %s", pid, exc)
 
 
+_SYNCHRONIZE = 0x00100000
+_PROCESS_TERMINATE = 0x0001
+_WAIT_TIMEOUT = 0x00000102
+
+
+def _kernel32() -> Any:
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # instanta proprie: argtypes locale
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    return k32
+
+
+def _open_process(pid: int) -> int | None:
+    """Handle pentru asteptat/oprit procesul. Luat inainte de Quit, ca pid-ul sa nu poata fi
+    refolosit de alt proces intre timp."""
+    return _kernel32().OpenProcess(_SYNCHRONIZE | _PROCESS_TERMINATE, False, pid) or None
+
+
+def _wait_or_terminate(handle: int, seconds: float) -> bool:
+    """Asteapta sa se termine procesul; daca nu se termina la timp, il opreste.
+    True daca a trebuit oprit. Inchide handle-ul."""
+    k32 = _kernel32()
+    try:
+        if k32.WaitForSingleObject(handle, int(seconds * 1000)) != _WAIT_TIMEOUT:
+            return False
+        k32.TerminateProcess(handle, 1)
+        k32.WaitForSingleObject(handle, 5000)
+        return True
+    finally:
+        k32.CloseHandle(handle)
+
+
 # --- dialoguri ascunse --------------------------------------------------------------------
 
 # Butoanele pe care avem voie sa le apasam, in ordinea preferintei. „Doar citire” e primul:
@@ -519,6 +558,9 @@ class OfficeApp:
     progid = ""
     image = ""
     name = ""
+    # Cat asteptam dupa Quit ca procesul pornit de noi sa dispara, inainte sa-l oprim.
+    # None: nu asteptam (Word poate inca salva Normal.dotm, nu are voie sa fie oprit).
+    quit_grace: float | None = None
 
     def __init__(self) -> None:
         self.app: Any = None
@@ -551,16 +593,28 @@ class OfficeApp:
     def configure(self) -> None:
         pass
 
+    def prepare_quit(self) -> bool:
+        """Chemat inainte de Quit, doar pentru o instanta pornita de noi. False: instanta nu
+        trebuie inchisa (si nici oprita fortat)."""
+        return True
+
     def quit(self) -> None:
         if self.app is None:
             return
+        handle = None
         try:
-            if self.owned and not self.timed_out:
+            if self.owned and not self.timed_out and self.prepare_quit():
+                if self.quit_grace is not None and self.pid:
+                    handle = _open_process(self.pid)
                 self.app.Quit()
         except Exception as exc:  # aplicatia poate fi deja moarta
             log.debug("Quit %s: %s", self.name, exc)
         finally:
-            self.app = None
+            self.app = None  # eliberam referinta COM: altfel procesul nu se poate inchide
+        grace = self.quit_grace
+        if handle is not None and grace is not None and _wait_or_terminate(handle, grace):
+            log.info("%s (pid %s) inca rula la %.0f s dupa Quit; l-am oprit",
+                     self.name, self.pid, grace)
 
     def kill(self) -> bool:
         """Opreste fortat procesul (apelat din alt fir). False daca nu e al nostru."""
@@ -789,6 +843,15 @@ class ExcelApp(OfficeApp):
     progid = "Excel.Application"
     image = "EXCEL.EXE"
     name = "Microsoft Excel"
+    # Dupa un export in PDF, Excel ramane uneori ~60 s in memorie dupa Quit (de obicei iese in
+    # 2-4 s). Registrul e deja inchis fara salvare, deci oprirea nu pierde nimic. Sub limita de
+    # 10 s cu care interfata asteapta inchiderea pool-ului.
+    quit_grace = 8.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.open_workbooks = 0  # registrele deschise acum de noi in aceasta instanta
+        self._remote_requests: bool | None = None  # valoarea initiala, cat timp e schimbata
 
     def configure(self) -> None:
         self.app.Visible = False
@@ -797,6 +860,49 @@ class ExcelApp(OfficeApp):
         self.app.AskToUpdateLinks = False
         self.app.EnableEvents = False
         self.app.AutomationSecurity = MSO_AUTOMATION_SECURITY_FORCE_DISABLE
+        self.open_workbooks = 0
+        if self.owned:
+            # Altfel un fisier deschis de utilizator din Explorer (DDE) poate ajunge in instanta
+            # noastra ascunsa. Setarea e globala si Excel o salveaza in registry la iesire, deci
+            # o refacem inainte de Quit; oprit fortat, Excel nu mai apuca sa o salveze.
+            self._remote_requests = bool(self.app.IgnoreRemoteRequests)
+            self.app.IgnoreRemoteRequests = True
+
+    def _restore_remote_requests(self) -> None:
+        if self._remote_requests is None:
+            return
+        try:
+            self.app.IgnoreRemoteRequests = self._remote_requests
+        except Exception as exc:  # intentionat larg: aplicatia poate fi deja moarta
+            log.debug("IgnoreRemoteRequests %s: %s", self.name, describe_error(exc))
+        finally:
+            self._remote_requests = None
+
+    def prepare_quit(self) -> bool:
+        """Reface IgnoreRemoteRequests; refuza inchiderea daca instanta are registre straine.
+
+        Un registru deschis de altcineva (de ex. de utilizator, inainte sa ignoram cererile
+        DDE) nu are voie sa fie pierdut: cu DisplayAlerts = False, Quit l-ar inchide fara sa
+        intrebe si fara sa-l salveze, iar oprirea fortata la fel. Instanta e facuta vizibila
+        si lasata utilizatorului, care o inchide singur."""
+        try:
+            count = int(self.app.Workbooks.Count)
+        except Exception as exc:  # intentionat larg: aplicatia poate fi deja moarta
+            log.debug("Workbooks.Count %s: %s", self.name, describe_error(exc))
+            count = 0
+        self._restore_remote_requests()
+        foreign = count - self.open_workbooks
+        if foreign <= 0:
+            return True
+        log.warning("%s (pid %s) are %d registru(e) deschis(e) de altcineva; nu il inchid si "
+                    "nu il opresc, il las vizibil utilizatorului", self.name, self.pid, foreign)
+        with contextlib.suppress(Exception):
+            self.app.DisplayAlerts = True
+            self.app.ScreenUpdating = True
+            self.app.EnableEvents = True
+            self.app.Visible = True
+            self.app.UserControl = True  # ramane deschis dupa ce eliberam referinta
+        return False
 
     def convert(self, job: Job, options: ExportOptions, src: Path) -> None:
         wb = self.app.Workbooks.Open(
@@ -809,6 +915,7 @@ class ExcelApp(OfficeApp):
             Notify=False,
             AddToMru=False,
         )
+        self.open_workbooks += 1
         try:
             self._limit_to_content(wb)
             wb.ExportAsFixedFormat(
@@ -821,6 +928,7 @@ class ExcelApp(OfficeApp):
             )
         finally:
             wb.Close(SaveChanges=False)
+            self.open_workbooks -= 1  # doar daca s-a inchis: altfel e tot al nostru, deschis
 
     # Excel tipareste toata zona „folosita” a foii, care poate fi mult mai mare decat datele:
     # formatare pe coloane intregi, formule trase in jos care intorc "", un spatiu uitat.

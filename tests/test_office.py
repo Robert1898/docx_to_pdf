@@ -324,3 +324,19 @@ def test_timeout_kills_word_then_recovers_and_cleans_up(
     assert results[1].status is Status.DONE, results[1].message
     assert registry_value() == before
     assert word_marks_mentioning(samples["docx"].parent) == []
+
+
+def test_excel_started_by_the_app_is_gone_after_conversion(samples, tmp_path: Path) -> None:
+    """Dupa Quit, Excel ramane uneori inca ~60 s in memorie (dupa un export in PDF). Aplicatia
+    trebuie sa lase in urma zero procese EXCEL.EXE pornite de ea, imediat ce lotul s-a terminat.
+    Intarzierea e intermitenta, de aceea conversia se repeta de cateva ori."""
+    from convertor.office import _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+    before = _pids("EXCEL.EXE")  # Excel-ul utilizatorului sau cel care a creat fisierul
+    for attempt in range(3):
+        [result] = run([samples["xlsx"]], tmp_path / f"out{attempt}")
+        assert result.status is Status.DONE, result.message
+        left = _pids("EXCEL.EXE") - before
+        assert not left, f"conversia {attempt + 1}: Excel pornit de aplicatie inca ruleaza {left}"
