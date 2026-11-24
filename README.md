@@ -64,8 +64,8 @@ mereu pe rând (Windows permite o singură instanță).
   dublu-click deschide rezultatul, click-dreapta oferă mai multe opțiuni
 - Rezultatul se salvează lângă original sau într-un folder ales; nu suprascrie nimic fără să întrebe
 - **Dialogurile ascunse ale lui Office** (de ex. „Ultima dată când ați deschis fișierul a cauzat o
-  eroare gravă. Îl deschideți oricum?”) primesc răspuns automat, în loc să blocheze conversia;
-  textul lor apare în jurnal
+  eroare gravă. Îl deschideți oricum?”) primesc răspuns automat, în loc să blocheze conversia,
+  dar doar cu un buton sigur dintr-o listă albă (vezi Depanare); textul lor apare în jurnal
 - Buton **Anulează** și **limită de timp per fișier**: dacă Office tot se blochează, instanța
   pornită de aplicație e oprită și se trece la următorul fișier (o instanță deschisă de tine nu
   este oprită niciodată)
@@ -205,9 +205,12 @@ Cod de ieșire: `0` totul a mers, `1` unele fișiere au eșuat, `2` argumente gr
   PDF-ul…” (`DisableConvertPdfWarning`) și îl readuce la valoarea inițială la final, chiar și după
   o închidere bruscă (la următoarea pornire).
 - Cât timp un fișier se convertește, aplicația urmărește ferestrele instanței Office pornite de
-  ea. Dacă apare un dialog, îl citește (UI Automation), îl notează în jurnal și apasă primul buton
-  („Da” / „OK” / „Doar citire”). Fișierele sunt deschise doar pentru citire și nu sunt salvate
-  niciodată, așa că răspunsul afirmativ e sigur.
+  ea. Dacă apare un dialog, îl citește (UI Automation) și îl notează în jurnal, cu textul și
+  butoanele lui. Apasă doar un buton dintr-o listă albă, în ordinea preferinței: „Doar citire” /
+  „Read-Only”, „Da” / „Yes”, „Deschide” / „Open”, „OK”. Fișierele sunt deschise doar pentru citire
+  și nu sunt salvate niciodată, așa că un astfel de răspuns e sigur. Un dialog fără niciunul dintre
+  aceste butoane (de ex. doar „Nu” / „Anulare”, sau „Salvează”) rămâne neatins: limita de timp
+  oprește instanța, iar eroarea fișierului conține textul dialogului.
 - Dacă Word trebuie totuși oprit forțat, el marchează fișierul ca „periculos” (în
   `Resiliency\DisabledItems`). Aplicația șterge marcajele vizibile în registry, iar dialogul pe care
   Word l-ar afișa la redeschiderea fișierului primește răspuns automat.
