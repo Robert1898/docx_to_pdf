@@ -143,6 +143,9 @@ class SettingsTab(Scrollable):
         self.check_button.pack(side=tk.LEFT)
         self.install_button = icon_button(row, _("Descarcă și instalează"), self.install,
                                           "success", "download")
+        # release fara sume de control: doar linkul spre pagina lui, fara instalare automata
+        self.page_button = icon_button(row, _("Deschide pagina release-ului"), self.open_page,
+                                       "secondary-outline", "open")
         self.update_label = ttk.Label(row, textvariable=self.update_status,
                                       bootstyle="secondary")
         self.update_label.pack(side=tk.LEFT, padx=12)
@@ -299,9 +302,18 @@ class SettingsTab(Scrollable):
             self.update_status.set(_("Ai cea mai nouă versiune ({v}).").format(v=__version__))
             return
         self.release = release
-        self.update_status.set(_("Versiune nouă: {v} (ai {current}).").format(
-            v=release.version, current=__version__))
-        self.install_button.pack(side=tk.LEFT, padx=(6, 0), before=self.update_label)
+        self.install_button.pack_forget()
+        self.page_button.pack_forget()
+        if release.verifiable:
+            self.update_status.set(_("Versiune nouă: {v} (ai {current}).").format(
+                v=release.version, current=__version__))
+            self.install_button.pack(side=tk.LEFT, padx=(6, 0), before=self.update_label)
+        else:
+            self.update_status.set(_(
+                "Versiune nouă: {v}. Release-ul nu poate fi verificat, așa că nu îl instalez "
+                "automat; descarcă-l de pe pagina lui.").format(v=release.version))
+            if updater.is_allowed_url(release.page_url):
+                self.page_button.pack(side=tk.LEFT, padx=(6, 0), before=self.update_label)
         if quiet and release.version != self.app.settings.skipped_version:
             self.app.notify(_("Actualizare disponibilă"),
                             _("{app} {v} poate fi instalat din Setări.").format(
@@ -327,16 +339,21 @@ class SettingsTab(Scrollable):
 
         def work() -> None:
             try:
-                path = updater.download(release, progress)
-            except OSError as exc:
-                message = str(exc)
-                self.ui.post(lambda: (self.update_status.set(
-                    _("Descărcarea a eșuat: {error}").format(error=message)),
-                    self.install_button.configure(state=tk.NORMAL)))
+                path = updater.download(release, progress)  # verificat cu SHA256SUMS.txt
+            except (OSError, updater.UpdateError) as exc:
+                message = (str(exc) if isinstance(exc, updater.UpdateError)
+                           else _("Descărcarea a eșuat: {error}").format(error=exc))
+                log.warning("Actualizare refuzata: %s", message)
+                self.ui.post(lambda: (self.update_status.set(message),
+                                      self.install_button.configure(state=tk.NORMAL)))
                 return
             self.ui.post(lambda: self._launch(path))
 
         threading.Thread(target=work, name="update-download", daemon=True).start()
+
+    def open_page(self) -> None:
+        if self.release is not None and updater.is_allowed_url(self.release.page_url):
+            os.startfile(self.release.page_url)  # type: ignore[attr-defined]
 
     def _launch(self, path: Path) -> None:
         updater.launch_installer(path)
@@ -393,7 +410,7 @@ class SettingsTab(Scrollable):
                 shell.create_sendto()
             else:
                 shell.remove_sendto()
-        except Exception as exc:
+        except Exception as exc:  # intentionat larg: eroarea COM/Win32 e aratata utilizatorului
             log.exception("Trimite catre")
             messagebox.showerror(_("Integrare Windows"), str(exc), parent=self)
         self.sendto.set(shell.sendto_registered())

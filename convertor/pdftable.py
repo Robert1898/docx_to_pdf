@@ -172,7 +172,8 @@ def _is_continuation(row: list[Cell | None], previous: list[Cell | None] | None)
         return None
     index = filled[0]
     cell, above = row[index], previous[index]
-    if not isinstance(cell.value, str) or above is None or not isinstance(above.value, str):
+    if (cell is None or not isinstance(cell.value, str)
+            or above is None or not isinstance(above.value, str)):
         return None
     # randul de deasupra trebuie sa fie un rand de date (cu cel putin inca o valoare)
     return index if sum(c is not None for c in previous) >= 2 else None
@@ -214,9 +215,9 @@ def rows_from_pages(pages: list[Page], drop_repeated: bool = True,
                 row[index] = Cell(value, bold, decimals)
             target = _is_continuation(row, rows[-1] if rows else None) if join_wrapped else None
             if target is not None:
-                above = rows[-1][target]
-                assert above is not None
-                rows[-1][target] = Cell(f"{above.value} {row[target].value}", above.bold)
+                above, below = rows[-1][target], row[target]
+                assert above is not None and below is not None  # verificat de _is_continuation
+                rows[-1][target] = Cell(f"{above.value} {below.value}", above.bold)
                 continue
             rows.append(row)
     return rows

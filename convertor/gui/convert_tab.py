@@ -485,6 +485,7 @@ class ConvertTab(ttk.Frame):
         results: list[Result] = []
         try:
             results = engine.run(jobs, skip=skip)
+        # intentionat larg: firul de lucru anunta orice eroare in interfata
         except Exception as exc:
             log.exception("Lotul de conversie a esuat")
             message = str(exc)

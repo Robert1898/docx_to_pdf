@@ -114,6 +114,8 @@ class OfficePool:
                 self._sessions.add(session)
             try:
                 while True:
+                    if self._tasks.empty():
+                        session.on_idle()  # sfarsitul lotului: PowerPoint se inchide acum
                     try:
                         item = self._tasks.get(timeout=self.idle_timeout)
                     except queue.Empty:
@@ -125,6 +127,7 @@ class OfficePool:
                         continue
                     try:
                         future.set_result(fn(session))
+                    # intentionat larg: orice eroare ajunge la cel care asteapta rezultatul
                     except BaseException as exc:
                         future.set_exception(exc)
             finally:
@@ -231,7 +234,7 @@ class Engine:
         log.info("Convertesc %s -> %s", job.src, job.dst)
         try:
             note = self._convert(session, job)
-        except Exception as exc:
+        except Exception as exc:  # intentionat larg: un fisier esuat nu opreste lotul
             if self.cancel_event.is_set():
                 return Result(job, Status.CANCELLED)
             friendly = isinstance(exc, ConversionError | pdftools.PdfError)

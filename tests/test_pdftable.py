@@ -52,14 +52,15 @@ def test_rows_from_pages_finds_columns_and_numbers(tmp_path: Path) -> None:
     rows = pdftable.rows_from_pages(read_pages(table_pdf(tmp_path / "t.pdf"), shapes=False))
     assert len(rows) == 13
     assert [c.value for c in rows[0] if c] == ["Data", "Descriere", "Suma"]
-    assert rows[0][0].bold
-    first = rows[1]
-    assert first[0].value == dt.date(2026, 9, 1)
-    assert first[1].value == "Factura client 1"
-    assert first[2].value == pytest.approx(1234.5)
-    assert first[2].decimals == 2
+    header, (date, text, amount) = rows[0][0], rows[1][:3]
+    assert header and date and text and amount
+    assert header.bold
+    assert date.value == dt.date(2026, 9, 1)
+    assert text.value == "Factura client 1"
+    assert amount.value == pytest.approx(1234.5)
+    assert amount.decimals == 2
     # toate sumele in aceeasi coloana, ca numere
-    assert all(isinstance(r[2].value, float) for r in rows[1:])
+    assert all(r[2] is not None and isinstance(r[2].value, float) for r in rows[1:])
 
 
 def test_convert_writes_valid_xlsx(tmp_path: Path) -> None:

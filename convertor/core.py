@@ -67,7 +67,7 @@ class ExportOptions:
     pdfa: bool = False  # PDF/A-1 pentru arhivare
     for_screen: bool = False  # calitate redusa, fisier mai mic
     ocr: bool = False  # OCR pe PDF-urile scanate inainte de conversia in DOCX/Excel
-    timeout: int = 180  # secunde per fisier
+    timeout: float = 180  # secunde per fisier
     pdf_mode: str = "auto"  # PDF -> DOCX: auto / layout (aspect fidel) / word (text curgator)
     pdf_target: str = "docx"  # PDF -> docx sau xlsx
     workers: int = 2  # conversii simultane

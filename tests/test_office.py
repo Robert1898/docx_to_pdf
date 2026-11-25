@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from pypdf import PdfReader
+from pypdf.generic import Destination
 
 from convertor.core import ExportOptions, Kind, plan_jobs
 from convertor.engine import Engine, Status
@@ -109,7 +110,10 @@ def test_word_to_pdf_with_bookmarks_and_pdfa(samples, tmp_path: Path) -> None:
     [result] = run([samples["docx"]], tmp_path, bookmarks=True, pdfa=True)
     assert result.status is Status.DONE, result.message
     reader = PdfReader(result.job.dst)
-    assert [item.title for item in reader.outline] == ["Capitol unu", "Capitol doi"]
+    outline = reader.outline
+    assert all(isinstance(item, Destination) for item in outline)  # fara sub-capitole
+    assert [item.title for item in outline if isinstance(item, Destination)] == [
+        "Capitol unu", "Capitol doi"]
     assert "ăîșțâ" in reader.pages[0].extract_text()
     assert reader.xmp_metadata is not None and reader.xmp_metadata.pdfaid_part
     assert registry_value() == before
@@ -313,7 +317,7 @@ def test_timeout_kills_word_then_recovers_and_cleans_up(
         # primul fisier primeste o limita imposibila: Word e oprit in timp ce il deschide
         calls.append(job)
         if len(calls) == 1:
-            options = ExportOptions(timeout=0.05)  # type: ignore[arg-type]
+            options = ExportOptions(timeout=0.05)
         return real_convert(self, job, options, src)
 
     monkeypatch.setattr(office.OfficeSession, "convert", convert)
@@ -324,3 +328,153 @@ def test_timeout_kills_word_then_recovers_and_cleans_up(
     assert results[1].status is Status.DONE, results[1].message
     assert registry_value() == before
     assert word_marks_mentioning(samples["docx"].parent) == []
+
+
+def test_excel_started_by_the_app_is_gone_after_conversion(samples, tmp_path: Path) -> None:
+    """Dupa Quit, Excel ramane uneori inca ~60 s in memorie (dupa un export in PDF). Aplicatia
+    trebuie sa lase in urma zero procese EXCEL.EXE pornite de ea, imediat ce lotul s-a terminat.
+    Intarzierea e intermitenta, de aceea conversia se repeta de cateva ori."""
+    from convertor.office.process import _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+    before = _pids("EXCEL.EXE")  # Excel-ul utilizatorului sau cel care a creat fisierul
+    for attempt in range(3):
+        [result] = run([samples["xlsx"]], tmp_path / f"out{attempt}")
+        assert result.status is Status.DONE, result.message
+        left = _pids("EXCEL.EXE") - before
+        assert not left, f"conversia {attempt + 1}: Excel pornit de aplicatie inca ruleaza {left}"
+
+
+def test_powerpoint_with_a_user_presentation_is_left_running(samples, tmp_path: Path) -> None:
+    """O prezentare deschisa de utilizator ajunge in PowerPoint-ul nostru (o singura instanta).
+    La sfarsitul lotului PowerPoint nu primeste Quit si nu e oprit."""
+    import shutil
+
+    import win32com.client
+
+    from convertor.office import OfficeSession, PowerPointApp
+    from convertor.office.process import _kill, _pids
+
+    if "pptx" not in samples:
+        pytest.skip("PowerPoint nu e instalat")
+    [job] = plan_jobs([samples["pptx"]], tmp_path / "out")
+    job.dst.parent.mkdir(parents=True)
+    user_copy = tmp_path / "a utilizatorului.pptx"
+    shutil.copy(samples["pptx"], user_copy)
+    with OfficeSession() as session:
+        session.convert(job, ExportOptions())
+        app = session._apps[PowerPointApp]
+        pid = app.pid
+        assert app.owned and pid
+        user = win32com.client.Dispatch("PowerPoint.Application")  # acelasi proces
+        presentation = user.Presentations.Open(str(user_copy), ReadOnly=True, WithWindow=True)
+        try:
+            assert app.kill() is False  # fereastra utilizatorului opreste oprirea fortata
+            session.on_idle()
+            assert PowerPointApp not in session._apps
+            time.sleep(3)
+            assert pid in _pids("POWERPNT.EXE"), "PowerPoint-ul cu prezentarea a fost inchis"
+            assert user.Presentations.Count == 1
+        finally:
+            presentation.Close()
+            user.Quit()
+            presentation = user = None
+            deadline = time.time() + 15
+            while pid in _pids("POWERPNT.EXE") and time.time() < deadline:
+                time.sleep(0.2)
+            if pid in _pids("POWERPNT.EXE"):
+                _kill(pid)  # pornit de test
+
+
+def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
+        samples, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """La timeout, o instanta care nu poate fi oprita (documente straine) ramane pornita, dar
+    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza."""
+    from convertor.office import ConversionTimeout, ExcelApp, OfficeSession
+    from convertor.office.process import _kill, _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+
+    def blocked(self, job, options, src) -> None:
+        self.app.Wait(self.app.Evaluate("NOW()+TIME(0,0,30)"))  # apel COM blocat 30 s
+
+    monkeypatch.setattr(ExcelApp, "convert", blocked)
+    monkeypatch.setattr(ExcelApp, "has_foreign_documents", lambda self: True)
+    [job] = plan_jobs([samples["xlsx"]], tmp_path / "out")
+    pid = None
+    try:
+        with OfficeSession() as session:
+            app = session._app(ExcelApp)
+            app.ensure()
+            pid = app.pid
+            start = time.monotonic()
+            with pytest.raises(ConversionTimeout, match="documente deschise de utilizator"):
+                session.convert(job, ExportOptions(timeout=2))
+            assert time.monotonic() - start < 15
+            assert app.app is None
+            assert pid in _pids("EXCEL.EXE")  # nu a fost oprit
+    finally:
+        if pid is not None:
+            # fara registre si fara referinte, Excel iese singur dupa ce se termina asteptarea
+            deadline = time.time() + 45
+            while pid in _pids("EXCEL.EXE") and time.time() < deadline:
+                time.sleep(0.5)
+            if pid in _pids("EXCEL.EXE"):
+                _kill(pid)  # pornit de test
+
+
+def test_excel_global_dde_setting_is_never_changed(samples, tmp_path: Path) -> None:
+    """IgnoreRemoteRequests e globala si Excel o salveaza la iesire: dupa o conversie, un Excel
+    nou trebuie sa citeasca aceeasi valoare ca inainte."""
+    import pythoncom
+    import win32com.client
+
+    from convertor.office.process import _kill, _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+
+    def read_setting() -> bool:
+        pythoncom.CoInitialize()
+        try:
+            before = _pids("EXCEL.EXE")
+            excel = win32com.client.DispatchEx("Excel.Application")
+            new = _pids("EXCEL.EXE") - before
+            try:
+                return bool(excel.IgnoreRemoteRequests)
+            finally:
+                excel.Quit()
+                excel = None
+                deadline = time.time() + 20
+                while _pids("EXCEL.EXE") & new and time.time() < deadline:
+                    time.sleep(0.2)
+                for left in _pids("EXCEL.EXE") & new:
+                    _kill(left)  # pornit de test
+        finally:
+            pythoncom.CoUninitialize()
+
+    original = read_setting()
+    [result] = run([samples["xlsx"]], tmp_path)
+    assert result.status is Status.DONE, result.message
+    assert read_setting() == original
+
+
+def test_visible_excel_window_counts_as_foreign_work(samples) -> None:
+    """Instanta noastra e ascunsa: o fereastra XLMAIN vizibila inseamna ca altcineva lucreaza
+    in ea, deci nu are voie sa fie oprita fortat."""
+    from convertor.office import ExcelApp, OfficeSession
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+    with OfficeSession() as session:
+        app = session._app(ExcelApp)
+        app.ensure()
+        assert app.has_foreign_documents() is False
+        app.app.Visible = True
+        try:
+            assert app.has_foreign_documents() is True
+            assert app.kill() is False
+        finally:
+            app.app.Visible = False

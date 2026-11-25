@@ -1,5 +1,9 @@
 # Document Converter
 
+[![CI](https://github.com/Robert1898/docx_to_pdf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Robert1898/docx_to_pdf/actions/workflows/ci.yml)
+[![Release](https://github.com/Robert1898/docx_to_pdf/actions/workflows/release.yml/badge.svg)](https://github.com/Robert1898/docx_to_pdf/actions/workflows/release.yml)
+[![Ultima versiune](https://img.shields.io/github/v/release/Robert1898/docx_to_pdf)](https://github.com/Robert1898/docx_to_pdf/releases/latest)
+
 Aplicație Windows care convertește în masă documente Office și imagini în PDF, iar PDF-uri în
 DOCX sau Excel, plus unelte PDF (unire, împărțire, compresie, organizare pagini, semnătură, OCR).
 Totul rulează **local, offline**: documentele nu pleacă de pe calculator (singura conexiune la
@@ -64,8 +68,8 @@ mereu pe rând (Windows permite o singură instanță).
   dublu-click deschide rezultatul, click-dreapta oferă mai multe opțiuni
 - Rezultatul se salvează lângă original sau într-un folder ales; nu suprascrie nimic fără să întrebe
 - **Dialogurile ascunse ale lui Office** (de ex. „Ultima dată când ați deschis fișierul a cauzat o
-  eroare gravă. Îl deschideți oricum?”) primesc răspuns automat, în loc să blocheze conversia;
-  textul lor apare în jurnal
+  eroare gravă. Îl deschideți oricum?”) primesc răspuns automat, în loc să blocheze conversia,
+  dar doar cu un buton sigur dintr-o listă albă (vezi Depanare); textul lor apare în jurnal
 - Buton **Anulează** și **limită de timp per fișier**: dacă Office tot se blochează, instanța
   pornită de aplicație e oprită și se trece la următorul fișier (o instanță deschisă de tine nu
   este oprită niciodată)
@@ -108,7 +112,10 @@ e deschisă, și minimizată; opțiunea „Pornește odată cu Windows” o desc
 **Actualizări**: aplicația verifică cel mult o dată pe zi dacă există o versiune nouă în
 [GitHub Releases](https://github.com/Robert1898/docx_to_pdf/releases) și o poate descărca și
 instala din Setări. Verificarea se poate opri. Funcționează doar dacă depozitul și release-urile
-sunt publice.
+sunt publice. Installer-ul descărcat e pornit doar dacă hash-ul lui SHA-256 se potrivește cu
+`SHA256SUMS.txt` din același release, iar descărcarea merge doar pe https, la domeniile GitHub.
+Un release fără `SHA256SUMS.txt` nu se instalează automat: aplicația oferă doar linkul spre pagina
+lui.
 
 **Scurtături**: Ctrl+O adaugă fișiere (sau deschide un PDF în Pagini), Ctrl+Shift+O adaugă un
 folder, Ctrl+Enter pornește, Esc anulează, Delete elimină, Ctrl+1…4 schimbă tab-ul, Ctrl+S
@@ -202,15 +209,19 @@ Cod de ieșire: `0` totul a mers, `1` unele fișiere au eșuat, `2` argumente gr
   PDF-ul…” (`DisableConvertPdfWarning`) și îl readuce la valoarea inițială la final, chiar și după
   o închidere bruscă (la următoarea pornire).
 - Cât timp un fișier se convertește, aplicația urmărește ferestrele instanței Office pornite de
-  ea. Dacă apare un dialog, îl citește (UI Automation), îl notează în jurnal și apasă primul buton
-  („Da” / „OK” / „Doar citire”). Fișierele sunt deschise doar pentru citire și nu sunt salvate
-  niciodată, așa că răspunsul afirmativ e sigur.
+  ea. Dacă apare un dialog, îl citește (UI Automation) și îl notează în jurnal, cu textul și
+  butoanele lui. Apasă doar un buton dintr-o listă albă, în ordinea preferinței: „Doar citire” /
+  „Read-Only”, „Da” / „Yes”, „Deschide” / „Open”, „OK”. Fișierele sunt deschise doar pentru citire
+  și nu sunt salvate niciodată, așa că un astfel de răspuns e sigur. Un dialog fără niciunul dintre
+  aceste butoane (de ex. doar „Nu” / „Anulare”, sau „Salvează”) rămâne neatins: limita de timp
+  oprește instanța, iar eroarea fișierului conține textul dialogului.
 - Dacă Word trebuie totuși oprit forțat, el marchează fișierul ca „periculos” (în
   `Resiliency\DisabledItems`). Aplicația șterge marcajele vizibile în registry, iar dialogul pe care
   Word l-ar afișa la redeschiderea fișierului primește răspuns automat.
 
 ## Dezvoltare
 
+Necesită Python 3.11 sau mai nou (release-ul se construiește cu 3.12).
 ```bash
 python -m venv .venv
 ```
@@ -224,6 +235,9 @@ python -m venv .venv
 ### Teste și verificări
 ```bash
 .venv\Scripts\python -m ruff check .
+```
+```bash
+.venv\Scripts\python -m pyright --pythonpath .venv\Scripts\python.exe
 ```
 ```bash
 .venv\Scripts\python -m pytest -m "not office and not ocr"
@@ -248,12 +262,56 @@ Certificate Store) sau `SIGN_PFX` + `SIGN_PFX_PASSWORD` înainte de `build.ps1`;
 
 Versiunea se schimbă într-un singur loc: `convertor/__init__.py`.
 
+### Dependențe fixate (`requirements.lock`)
+`requirements.txt` și `requirements-dev.txt` conțin intervale (`>=`), folosite pentru dezvoltare și
+de CI, care rulează testele pe Python 3.11–3.14 cu cele mai noi versiuni permise. Release-ul se
+construiește însă din `requirements.lock`: versiuni exacte, cu hash-uri SHA-256, instalate cu
+`pip install --require-hashes`, ca fiecare installer publicat să fie reproductibil. Lock-ul e
+generat pe Windows cu Python 3.12, versiunea folosită de release.
+
+Se regenerează după ce schimbi `requirements*.txt` sau ca să iei versiuni noi (Dependabot actualizează
+acțiunile și intervalele, dar nu și lock-ul):
+```bash
+.venv\Scripts\python -m pip install pip-tools
+```
+```bash
+.venv\Scripts\python -m piptools compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url --upgrade --output-file requirements.lock requirements-dev.txt
+```
+Fără `--upgrade` păstrează versiunile existente și adaugă doar ce lipsește. Jobul `lock-check`
+din CI face exact asta într-un fișier temporar (`tools/check_lock.py`) și pică dacă rezultatul
+diferă de lock-ul din repo, adică dacă `requirements*.txt` s-au schimbat fără regenerare. Verifică apoi într-un
+venv nou: `pip install --require-hashes -r requirements.lock`, ruff și testele rapide.
+
+### CI/CD
+- `ci.yml` (la push pe `main` și la pull request): ruff, pyright (mod `basic`, configurat în
+  `pyproject.toml`) și testele rapide pe Python 3.11–3.14; raportul de acoperire
+  (`coverage.xml`) e salvat ca artefact pentru fiecare versiune. Jobul `lock-check` verifică, pe
+  Windows cu Python 3.12, că `requirements.lock` corespunde fișierelor `requirements*.txt`.
+- `release.yml` (la un tag `v*`): întâi job-ul `test` (ruff și testele rapide, din lock), apoi
+  build-ul, `SHA256SUMS.txt`, SBOM-ul CycloneDX și publicarea release-ului. Tag-ul trebuie să fie egal cu versiunea
+  din cod. Inno Setup are versiunea fixată (`choco install innosetup --version 6.7.1`); o versiune
+  nouă se schimbă manual în `release.yml`.
+- Toate acțiunile sunt fixate pe SHA-ul unui commit (versiunea e în comentariu);
+  `.github/dependabot.yml` propune săptămânal actualizări pentru acțiuni și dependențele pip.
+- Testele rapide folosesc peste tot aceiași markeri: `-m "not office and not ocr"`.
+- SBOM-ul (`document-converter-<versiune>.cdx.json`) descrie bibliotecile incluse în aplicație.
+  `tools/runtime_requirements.py` păstrează din `requirements.lock` doar dependențele aplicației,
+  fără uneltele de dezvoltare. Ele sunt instalate, cu hash-uri, într-un mediu separat, iar
+  `cyclonedx-py` face lista din acel mediu.
+- Schimbările pentru utilizatori sunt notate în [CHANGELOG.md](CHANGELOG.md).
+
 ### Structura
 ```
 convertor/
   core.py         tipuri de fișiere, opțiuni, nume pentru rezultate
   engine.py       rulează un lot de conversii (folosit de GUI și CLI)
-  office.py       Word / Excel / PowerPoint prin COM, limită de timp, curățenie în registry
+  office/         Word / Excel / PowerPoint prin COM:
+    session.py    aplicațiile unui lot, limita de timp per fișier
+    base.py       erorile pentru utilizator și aplicația Office generică
+    word.py, excel.py, powerpoint.py   conversia propriu-zisă pentru fiecare aplicație
+    dialogs.py    răspunsul la dialogurile ascunse (lista albă de butoane)
+    registry.py   setările Word atinse temporar, curățenia după oprire
+    process.py    găsirea, așteptarea și oprirea proceselor Office
   libreoffice.py  alternativa fără Office
   pdflayout.py    PDF → DOCX cu aspect fidel (rânduri, coloane, chenare, imagini)
   pdftable.py     PDF → Excel (coloane, numere, date)
@@ -270,6 +328,9 @@ convertor/
   gui/            interfața (ttkbootstrap + tkinterdnd2), instanță unică, progres în taskbar
 tests/            pytest
 installer/        script Inno Setup + traducerea română a installer-ului
+tools/            runtime_requirements.py: dependențele aplicației pentru SBOM;
+                  check_lock.py: lock-ul sincronizat cu requirements (CI)
+CHANGELOG.md      istoricul versiunilor
 ```
 
 ## Licență

@@ -6,3 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.part
+.coverage
+coverage.xml
+# SBOM (release.yml)
+.sbom-venv/
+.sbom-pyproject.toml
+*.egg-info/

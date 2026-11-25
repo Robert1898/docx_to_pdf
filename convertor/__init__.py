@@ -3,7 +3,7 @@
 Numele de aici sunt singura sursa: spec-ul PyInstaller, build.ps1 si installer-ul le citesc.
 """
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 APP_NAME = "Document Converter"
 APP_TITLE = APP_NAME

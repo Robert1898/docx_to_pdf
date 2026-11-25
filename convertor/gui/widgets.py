@@ -8,6 +8,7 @@ import queue
 import tkinter as tk
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import ttkbootstrap as ttk
 
@@ -20,12 +21,12 @@ class UiQueue:
     """Firele de lucru nu au voie sa atinga widget-urile; trimit functii aici."""
 
     def __init__(self, widget: tk.Misc, interval: int = 80) -> None:
-        self._queue: queue.Queue[Callable[[], None]] = queue.Queue()
+        self._queue: queue.Queue[Callable[[], object]] = queue.Queue()
         self._widget = widget
         self._interval = interval
         widget.after(interval, self._poll)
 
-    def post(self, fn: Callable[[], None]) -> None:
+    def post(self, fn: Callable[[], object]) -> None:  # rezultatul e ignorat
         self._queue.put(fn)
 
     def _poll(self) -> None:
@@ -34,7 +35,7 @@ class UiQueue:
                 fn = self._queue.get_nowait()
                 try:
                     fn()
-                except Exception:
+                except Exception:  # intentionat larg: o actualizare stricata nu opreste coada
                     log.exception("Eroare in actualizarea interfetei")
         except queue.Empty:
             pass
@@ -42,7 +43,7 @@ class UiQueue:
             self._widget.after(self._interval, self._poll)
 
 
-def enable_drop(widget: tk.Misc, callback: Callable[[Sequence[str]], None]) -> bool:
+def enable_drop(widget: tk.Misc, callback: Callable[[Sequence[str]], object]) -> bool:
     """Accepta fisiere trase din Explorer. False daca tkdnd nu e disponibil."""
     try:
         from tkinterdnd2 import DND_FILES
@@ -55,7 +56,8 @@ def enable_drop(widget: tk.Misc, callback: Callable[[Sequence[str]], None]) -> b
 
         widget.dnd_bind("<<Drop>>", on_drop)  # type: ignore[attr-defined]
         return True
-    except Exception as exc:
+    # fara tkinterdnd2, fereastra nu e TkinterDnD (metode lipsa) sau tkdnd nu s-a incarcat
+    except (ImportError, AttributeError, tk.TclError) as exc:
         log.debug("Drag & drop indisponibil: %s", exc)
         return False
 
@@ -63,12 +65,12 @@ def enable_drop(widget: tk.Misc, callback: Callable[[Sequence[str]], None]) -> b
 def tooltip(widget: tk.Misc, text: str) -> None:
     try:
         ttk.ToolTip(widget, text=text)
-    except Exception as exc:  # doar decorativ
+    except tk.TclError as exc:  # doar decorativ
         log.debug("ToolTip: %s", exc)
 
 
 def icon_button(master: tk.Misc, text: str, command: Callable[[], object], bootstyle: str,
-                glyph: str | None = None, mirror: bool = False, **kwargs: object) -> ttk.Button:
+                glyph: str | None = None, mirror: bool = False, **kwargs: Any) -> ttk.Button:
     """Buton cu iconita in stanga textului (alba pe butoanele pline, gri pe cele conturate)."""
     from .icons import icon
 

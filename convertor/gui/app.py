@@ -13,6 +13,7 @@ import traceback
 from collections.abc import Sequence
 from pathlib import Path
 from tkinter import messagebox
+from types import TracebackType
 from typing import Any
 
 import ttkbootstrap as ttk
@@ -23,7 +24,7 @@ from ..engine import Backends, Engine, OfficePool, Result, Status
 from ..i18n import _
 from ..log import setup_logging
 from ..paths import resource_path
-from ..watch import FolderWatcher, default_output
+from ..watch import MAX_RETRIES, FolderWatcher, default_output
 from .convert_tab import ConvertTab
 from .instance import InstanceServer
 from .pages_tab import PagesTab
@@ -44,7 +45,7 @@ def _make_root() -> tk.Tk:
         from tkinterdnd2 import TkinterDnD
 
         return TkinterDnD.Tk()
-    except Exception as exc:
+    except (ImportError, RuntimeError, tk.TclError) as exc:  # pachet sau biblioteca tkdnd lipsa
         log.warning("tkdnd indisponibil, fara drag & drop: %s", exc)
         return tk.Tk()
 
@@ -136,7 +137,7 @@ class App:
         """Notificare discreta in coltul ecranului, fara sa blocheze fereastra."""
         try:
             ttk.ToastNotification(title=title, message=message, duration=4000).show_toast()
-        except Exception as exc:
+        except tk.TclError as exc:
             log.debug("Toast indisponibil: %s", exc)
 
     def bring_to_front(self) -> None:
@@ -238,12 +239,13 @@ class App:
         folder_in = Path(s.watch_in)
         folder_out = Path(s.watch_out) if s.watch_out else default_output(folder_in)
         self.watcher = FolderWatcher(folder_in, folder_out, self._watch_convert,
-                                     pdf_target=lambda: self.settings.pdf_target)
+                                     pdf_target=lambda: self.settings.pdf_target,
+                                     on_give_up=self._watch_gave_up)
         self.watcher.start()
         self.settings_tab.watch_info(_("Urmăresc „{folder}”.").format(folder=folder_in))
 
     def _watch_convert(self, jobs: list[Job]) -> list[Result]:
-        """Ruleaza in firul de urmarire."""
+        """Ruleaza in firul de urmarire; rezultatele decid ce fisiere sunt reincercate."""
         options = self.settings.export_options()
         engine = Engine(options, backends=self.backends, pool=self.pool(options.workers))
         results = engine.run(jobs)
@@ -251,9 +253,19 @@ class App:
         failed = sum(r.status is Status.FAILED for r in results)
         text = _("{done} convertite, {failed} eșuate din folderul urmărit.").format(
             done=done, failed=failed)
+        if failed:
+            text += " " + _("Cele eșuate sunt reîncercate de cel mult {count} ori.").format(
+                count=MAX_RETRIES)
         self.ui.post(lambda: (self.settings_tab.watch_info(text),
                               self.notify(_("Folder urmărit"), text)))
         return results
+
+    def _watch_gave_up(self, path: Path, error: str) -> None:
+        """Ruleaza in firul de urmarire, cand un fisier a esuat la toate incercarile."""
+        text = _("„{name}” nu a putut fi convertit după {count} încercări: {error}").format(
+            name=path.name, count=MAX_RETRIES + 1, error=error)
+        self.ui.post(lambda: (self.settings_tab.watch_info(text),
+                              self.notify(_("Folder urmărit"), text)))
 
     # --- setari si inchidere --------------------------------------------------------------
 
@@ -302,7 +314,8 @@ class App:
         self.root.destroy()
         return True
 
-    def _on_tk_error(self, exc: type[BaseException], value: BaseException, tb: object) -> None:
+    def _on_tk_error(self, exc: type[BaseException], value: BaseException,
+                     tb: TracebackType | None) -> None:
         log.error("Eroare neasteptata:\n%s", "".join(traceback.format_exception(exc, value, tb)))
         messagebox.showerror(
             _("Eroare neașteptată"),

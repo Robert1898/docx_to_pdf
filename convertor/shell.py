@@ -43,10 +43,14 @@ def _menu_label(ext: str) -> str:
 
 def _notify_shell() -> None:
     try:
+        import pywintypes
         from win32com.shell import shell, shellcon
-
+    except ImportError as exc:
+        log.debug("SHChangeNotify: %s", exc)
+        return
+    try:
         shell.SHChangeNotify(shellcon.SHCNE_ASSOCCHANGED, shellcon.SHCNF_IDLIST, None, None)
-    except Exception as exc:  # doar reimprospatare, nu e critic
+    except pywintypes.error as exc:  # doar reimprospatare, nu e critic
         log.debug("SHChangeNotify: %s", exc)
 
 
