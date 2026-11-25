@@ -4,7 +4,7 @@ Toate schimbările importante ale aplicației sunt notate aici. Formatul urmeaz�
 [Keep a Changelog](https://keepachangelog.com/ro/1.1.0/), iar versiunile respectă
 [Semantic Versioning](https://semver.org/lang/ro/).
 
-## [Nelansat]
+## [2.4.0] - 2026-11-25
 
 ### Securitate
 - Actualizările sunt verificate înainte de instalare: installer-ul descărcat trebuie să aibă
