@@ -6,4 +6,4 @@ pypdf>=5.0          # unire, impartire, parola, watermark
 pycryptodome>=3.20  # criptare AES-256 pentru PDF-urile cu parola (mai mica decat cryptography)
 reportlab>=4.0      # textul pentru watermark
 pypdfium2>=4.30     # randarea paginilor pentru OCR
-Pillow>=10.0        # imagini (OCR, make_icon.py)
+Pillow>=13.0.0        # imagini (OCR, make_icon.py)
