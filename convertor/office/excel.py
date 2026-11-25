@@ -207,11 +207,16 @@ class ExcelApp(OfficeApp):
             return True
         log.warning("%s (pid %s) are %d registru(e) deschis(e) de altcineva; nu il inchid si "
                     "nu il opresc, il las vizibil utilizatorului", self.name, self.pid, foreign)
+        # fiecare separat: o setare refuzata nu are voie sa lase instanta ascunsa
         with contextlib.suppress(Exception):
             self.app.DisplayAlerts = True
+        with contextlib.suppress(Exception):
             self.app.ScreenUpdating = True
+        with contextlib.suppress(Exception):
             self.app.EnableEvents = True
+        with contextlib.suppress(Exception):
             self.app.Visible = True
+        with contextlib.suppress(Exception):
             self.app.UserControl = True  # ramane deschis dupa ce eliberam referinta
         return False
 

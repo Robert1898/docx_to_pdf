@@ -111,6 +111,34 @@ def test_foreign_workbook_keeps_excel_alive(process: list[str],
     assert app.app is None
 
 
+class StubbornExcel(FakeExcel):
+    """Excel care refuza unele setari (arunca la atribuire), de ex. cand e ocupat."""
+
+    refuse: frozenset[str] = frozenset()
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in self.refuse:
+            raise OSError(f"{name} refuzat")
+        super().__setattr__(name, value)
+
+
+HANDOVER = ("DisplayAlerts", "ScreenUpdating", "EnableEvents", "Visible", "UserControl")
+
+
+@pytest.mark.parametrize("refused", HANDOVER)
+def test_refused_setting_does_not_keep_foreign_workbook_hidden(process: list[str],
+                                                              refused: str) -> None:
+    fake = StubbornExcel()
+    app = excel_app(fake)
+    fake.Workbooks.Count = 1
+    fake.refuse = frozenset({refused})
+    app.quit()
+    assert fake.quit_calls == []
+    assert process == []
+    assert all(getattr(fake, name) is True for name in HANDOVER if name != refused)
+    assert getattr(fake, refused) is False  # ramasa cum a pus-o configure
+
+
 def test_own_open_workbook_is_not_foreign(process: list[str]) -> None:
     fake = FakeExcel()
     app = excel_app(fake)
