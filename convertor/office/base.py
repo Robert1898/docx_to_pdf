@@ -70,6 +70,8 @@ class OfficeApp:
         self.pid: int | None = None
         self.owned = False
         self.timed_out = False
+        # La timeout nu am putut opri procesul: apelul blocat a fost anulat, procesul ramane
+        self.abandoned = False
 
     @classmethod
     def available(cls) -> bool:
@@ -86,7 +88,7 @@ class OfficeApp:
         before = _pids(self.image)
         self.app = win32com.client.DispatchEx(self.progid)
         self.owned, self.pid = self._identify(before, _pids(self.image))
-        self.timed_out = False
+        self.timed_out = self.abandoned = False
         log.info("%s pornit (pid=%s, propriu=%s)", self.name, self.pid, self.owned)
         self.configure()
 
@@ -148,7 +150,7 @@ class OfficeApp:
             return
         handle = None
         try:
-            if self.owned and not self.timed_out and self.prepare_quit():
+            if self.owned and not (self.timed_out or self.abandoned) and self.prepare_quit():
                 if self.quit_grace is not None and self.pid:
                     handle = _open_process(self.pid)
                 self.app.Quit()
@@ -161,9 +163,18 @@ class OfficeApp:
             log.info("%s (pid %s) inca rula la %.0f s dupa Quit; l-am oprit",
                      self.name, self.pid, grace)
 
+    def has_foreign_documents(self) -> bool:
+        """Instanta are documente deschise de altcineva? Apelat din alt fir, cat timp aplicatia
+        poate fi blocata, deci fara COM."""
+        return False
+
     def kill(self) -> bool:
         """Opreste fortat procesul (apelat din alt fir). False daca nu e al nostru."""
         if not (self.owned and self.pid):
+            return False
+        if self.has_foreign_documents():
+            log.warning("%s (pid %s) are documente deschise de altcineva; nu il opresc",
+                        self.name, self.pid)
             return False
         self.timed_out = True
         _kill(self.pid)

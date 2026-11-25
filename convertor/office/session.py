@@ -14,6 +14,7 @@ from .base import OFFICE_DIED, ConversionError, ConversionTimeout, OfficeApp, de
 from .dialogs import DialogWatcher
 from .excel import ExcelApp
 from .powerpoint import POWERPOINT_LOCK, PowerPointApp
+from .process import _cancel_call, _enable_call_cancellation
 from .registry import ResiliencyCleaner
 from .word import WordApp
 
@@ -35,12 +36,15 @@ class OfficeSession:
         self._lock = threading.Lock()
         self._com_ready = False
         self._current: tuple[OfficeApp, Path] | None = None
+        self._thread_id: int | None = None  # firul care face apelurile COM
 
     def __enter__(self) -> OfficeSession:
         import pythoncom
 
         pythoncom.CoInitialize()
         self._com_ready = True
+        _enable_call_cancellation()
+        self._thread_id = threading.get_native_id()
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -58,6 +62,15 @@ class OfficeSession:
             if cls not in self._apps:
                 self._apps[cls] = cls()
             return self._apps[cls]
+
+    def on_idle(self) -> None:
+        """Chemat cand nu mai e nimic de convertit (la sfarsitul unui lot). Inchide PowerPoint:
+        are o singura instanta, deci orice prezentare deschisa de utilizator cat timp il tinem
+        pornit ar ajunge in procesul nostru. Word si Excel raman pentru lotul urmator."""
+        with self._lock:
+            app = self._apps.pop(PowerPointApp, None)
+        if app is not None:
+            app.quit()
 
     def kill_all(self) -> None:
         """Oprire de urgenta (de exemplu la inchiderea ferestrei). Sigur din orice fir."""
@@ -83,9 +96,10 @@ class OfficeSession:
         opened = src or job.src
         timer: threading.Timer | None = None
         watcher: DialogWatcher | None = None
+        done = threading.Event()
         try:
             app.ensure()
-            timer = threading.Timer(options.timeout, self._on_timeout, args=(app, opened))
+            timer = threading.Timer(options.timeout, self._on_timeout, args=(app, opened, done))
             timer.daemon = True
             if app.owned and app.pid:
                 watcher = DialogWatcher(app.pid)
@@ -103,31 +117,47 @@ class OfficeSession:
                     _("A depășit limita de {seconds} s; {app} a fost oprit și va fi repornit.")
                     .format(seconds=options.timeout, app=app.name) + dialog
                 ) from exc
+            if app.abandoned:
+                app.reset()  # procesul ramane, dar nu il mai folosim
+                raise ConversionTimeout(
+                    _("A depășit limita de {seconds} s; {app} are documente deschise de "
+                      "utilizator, așa că nu l-am oprit.")
+                    .format(seconds=options.timeout, app=app.name) + dialog
+                ) from exc
             message = describe_error(exc)
             if message == _(OFFICE_DIED):
                 app.reset()
             raise ConversionError(message + dialog) from exc
         finally:
+            done.set()
             if timer is not None:
                 timer.cancel()
             if watcher is not None:
                 watcher.stop()
             with self._lock:
                 self._current = None
+            if isinstance(app, PowerPointApp) and not app.owned:
+                app.reset()  # instanta altcuiva: nu tinem referinta intre fisiere
+        if app.abandoned:  # anularea a venit prea tarziu: fisierul e gata, instanta nu
+            app.reset()
         if watcher and watcher.answers:
             return _("am răspuns automat la {count} dialog(uri) {app}").format(
                 count=len(watcher.answers), app=app.name)
         return ""
 
-    @staticmethod
-    def _on_timeout(app: OfficeApp, opened: Path) -> None:
+    def _on_timeout(self, app: OfficeApp, opened: Path, done: threading.Event) -> None:
         if isinstance(app, WordApp):
             ResiliencyCleaner.remember(opened)
         if app.kill():
             log.warning("Timeout la %s: am oprit %s (pid %s)", opened, app.name, app.pid)
             if isinstance(app, WordApp):
                 ResiliencyCleaner.clean()  # inainte ca Word sa fie repornit
-        else:
-            log.warning(
-                "Timeout la %s, dar %s era deschis de utilizator si nu il opresc", opened, app.name
-            )
+            return
+        # Procesul nu e al nostru sau are documentele utilizatorului: nu il oprim. Anulam doar
+        # apelul nostru blocat, ca fisierul sa fie marcat esuat si firul sa poata continua.
+        log.warning("Timeout la %s, dar %s e deschis de utilizator sau are documentele lui; nu il "
+                    "opresc, renunt doar la fisier", opened, app.name)
+        app.abandoned = True
+        while self._thread_id is not None and not done.is_set():
+            _cancel_call(self._thread_id)  # apelul blocat poate incepe abia dupa prima cerere
+            done.wait(0.5)

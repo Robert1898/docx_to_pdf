@@ -114,6 +114,8 @@ class OfficePool:
                 self._sessions.add(session)
             try:
                 while True:
+                    if self._tasks.empty():
+                        session.on_idle()  # sfarsitul lotului: PowerPoint se inchide acum
                     try:
                         item = self._tasks.get(timeout=self.idle_timeout)
                     except queue.Empty:

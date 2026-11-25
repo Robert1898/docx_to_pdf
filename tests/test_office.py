@@ -340,3 +340,79 @@ def test_excel_started_by_the_app_is_gone_after_conversion(samples, tmp_path: Pa
         assert result.status is Status.DONE, result.message
         left = _pids("EXCEL.EXE") - before
         assert not left, f"conversia {attempt + 1}: Excel pornit de aplicatie inca ruleaza {left}"
+
+
+def test_powerpoint_with_a_user_presentation_is_left_running(samples, tmp_path: Path) -> None:
+    """O prezentare deschisa de utilizator ajunge in PowerPoint-ul nostru (o singura instanta).
+    La sfarsitul lotului PowerPoint nu primeste Quit si nu e oprit."""
+    import shutil
+
+    import win32com.client
+
+    from convertor.office import OfficeSession, PowerPointApp
+    from convertor.office.process import _kill, _pids
+
+    if "pptx" not in samples:
+        pytest.skip("PowerPoint nu e instalat")
+    [job] = plan_jobs([samples["pptx"]], tmp_path / "out")
+    job.dst.parent.mkdir(parents=True)
+    user_copy = tmp_path / "a utilizatorului.pptx"
+    shutil.copy(samples["pptx"], user_copy)
+    with OfficeSession() as session:
+        session.convert(job, ExportOptions())
+        app = session._apps[PowerPointApp]
+        pid = app.pid
+        assert app.owned and pid
+        user = win32com.client.Dispatch("PowerPoint.Application")  # acelasi proces
+        presentation = user.Presentations.Open(str(user_copy), ReadOnly=True, WithWindow=True)
+        try:
+            assert app.kill() is False  # fereastra utilizatorului opreste oprirea fortata
+            session.on_idle()
+            assert PowerPointApp not in session._apps
+            time.sleep(3)
+            assert pid in _pids("POWERPNT.EXE"), "PowerPoint-ul cu prezentarea a fost inchis"
+            assert user.Presentations.Count == 1
+        finally:
+            presentation.Close()
+            user.Quit()
+            presentation = user = None
+            deadline = time.time() + 15
+            while pid in _pids("POWERPNT.EXE") and time.time() < deadline:
+                time.sleep(0.2)
+            if pid in _pids("POWERPNT.EXE"):
+                _kill(pid)  # pornit de test
+
+
+def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
+        samples, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """La timeout, o instanta care nu poate fi oprita (documente straine) ramane pornita, dar
+    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza."""
+    from convertor.office import ConversionTimeout, ExcelApp, OfficeSession
+    from convertor.office.process import _kill, _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+
+    def blocked(self, job, options, src) -> None:
+        self.app.Wait(self.app.Evaluate("NOW()+TIME(0,0,30)"))  # apel COM blocat 30 s
+
+    monkeypatch.setattr(ExcelApp, "convert", blocked)
+    monkeypatch.setattr(ExcelApp, "has_foreign_documents", lambda self: True)
+    [job] = plan_jobs([samples["xlsx"]], tmp_path / "out")
+    pid = None
+    try:
+        with OfficeSession() as session:
+            app = session._app(ExcelApp)
+            app.ensure()
+            pid = app.pid
+            start = time.monotonic()
+            with pytest.raises(ConversionTimeout, match="documente deschise de utilizator"):
+                session.convert(job, ExportOptions(timeout=2))
+            assert time.monotonic() - start < 10
+            assert app.app is None
+            assert pid in _pids("EXCEL.EXE")  # nu a fost oprit
+    finally:
+        if pid is not None:
+            time.sleep(1)
+            if pid in _pids("EXCEL.EXE"):
+                _kill(pid)  # pornit de test

@@ -19,6 +19,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.closed = False
         self.killed = False
+        self.idle_calls = 0
         FakeSession.instances.append(self)
 
     def __enter__(self) -> FakeSession:
@@ -29,6 +30,9 @@ class FakeSession:
 
     def kill_all(self) -> None:
         self.killed = True
+
+    def on_idle(self) -> None:
+        self.idle_calls += 1
 
 
 @pytest.fixture
@@ -74,6 +78,26 @@ def test_pool_propagates_errors(fake_office: type[FakeSession]) -> None:
         with pytest.raises(ValueError, match="stricat"):
             pool.submit(boom).result(5)
         assert pool.submit(lambda s: "inca merge").result(5) == "inca merge"
+    finally:
+        pool.close()
+
+
+def test_on_idle_only_when_the_batch_is_done(fake_office: type[FakeSession]) -> None:
+    pool = engine.OfficePool(1, idle_timeout=5)
+    gate = threading.Event()
+    seen: list[int] = []
+    try:
+        first = pool.submit(lambda s: (gate.wait(5), seen.append(s.idle_calls)))
+        rest = [pool.submit(lambda s: seen.append(s.idle_calls)) for _ in range(2)]
+        gate.set()
+        for future in [first, *rest]:
+            future.result(5)
+        session = fake_office.instances[0]
+        deadline = time.time() + 5
+        while session.idle_calls == 0 and time.time() < deadline:
+            time.sleep(0.02)
+        assert seen == [0, 0, 0]  # nu intre fisierele aceluiasi lot
+        assert session.idle_calls == 1
     finally:
         pool.close()
 

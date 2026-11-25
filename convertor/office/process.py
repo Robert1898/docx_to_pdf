@@ -35,6 +35,41 @@ def _pid_of_window(hwnd: int) -> int | None:
     return win32process.GetWindowThreadProcessId(hwnd)[1] or None
 
 
+def _visible_windows(pid: int, classes: set[str]) -> list[int]:
+    """Ferestrele vizibile de nivel superior ale procesului, cu una dintre clasele date."""
+    import win32gui
+    import win32process
+
+    found: list[int] = []
+
+    def visit(hwnd: int, _: object) -> bool:
+        if (
+            win32gui.IsWindowVisible(hwnd)
+            and win32gui.GetClassName(hwnd) in classes
+            and win32process.GetWindowThreadProcessId(hwnd)[1] == pid
+        ):
+            found.append(hwnd)
+        return True
+
+    win32gui.EnumWindows(visit, None)
+    return found
+
+
+def _enable_call_cancellation() -> None:
+    """Permite ca un apel COM blocat al firului curent sa fie anulat din alt fir."""
+    import ctypes
+
+    ctypes.WinDLL("ole32").CoEnableCallCancellation(None)
+
+
+def _cancel_call(thread_id: int) -> bool:
+    """Anuleaza apelul COM in curs al firului (intoarce acolo RPC_E_CALL_CANCELED); procesul
+    Office nu e atins. False daca firul nu are acum niciun apel in curs."""
+    import ctypes
+
+    return ctypes.WinDLL("ole32").CoCancelCall(thread_id, 0) == 0
+
+
 def _kill(pid: int) -> None:
     try:
         os.kill(pid, signal.SIGTERM)  # pe Windows: TerminateProcess

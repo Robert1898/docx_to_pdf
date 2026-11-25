@@ -85,6 +85,10 @@ EN: dict[str, str] = {
     "Dialog: „{text}”": "Dialog: “{text}”",
     "A depășit limita de {seconds} s; {app} a fost oprit și va fi repornit.":
         "Exceeded the {seconds} s limit; {app} was stopped and will be restarted.",
+    "A depășit limita de {seconds} s; {app} are documente deschise de utilizator, așa că nu "
+    "l-am oprit.":
+        "Exceeded the {seconds} s limit; {app} has documents opened by the user, so it was "
+        "not stopped.",
     "Documentul nu mai are nicio pagină.": "The document has no pages left.",
     "Nu pot citi imaginea {name}: {error}": "Cannot read the image {name}: {error}",
     "PDF-ul este protejat cu parolă.": "The PDF is password protected.",
