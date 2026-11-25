@@ -277,13 +277,16 @@ acțiunile și intervalele, dar nu și lock-ul):
 ```bash
 .venv\Scripts\python -m piptools compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url --upgrade --output-file requirements.lock requirements-dev.txt
 ```
-Fără `--upgrade` păstrează versiunile existente și adaugă doar ce lipsește. Verifică apoi într-un
+Fără `--upgrade` păstrează versiunile existente și adaugă doar ce lipsește. Jobul `lock-check`
+din CI face exact asta într-un fișier temporar (`tools/check_lock.py`) și pică dacă rezultatul
+diferă de lock-ul din repo, adică dacă `requirements*.txt` s-au schimbat fără regenerare. Verifică apoi într-un
 venv nou: `pip install --require-hashes -r requirements.lock`, ruff și testele rapide.
 
 ### CI/CD
 - `ci.yml` (la push pe `main` și la pull request): ruff, pyright (mod `basic`, configurat în
   `pyproject.toml`) și testele rapide pe Python 3.11–3.14; raportul de acoperire
-  (`coverage.xml`) e salvat ca artefact pentru fiecare versiune.
+  (`coverage.xml`) e salvat ca artefact pentru fiecare versiune. Jobul `lock-check` verifică, pe
+  Windows cu Python 3.12, că `requirements.lock` corespunde fișierelor `requirements*.txt`.
 - `release.yml` (la un tag `v*`): întâi job-ul `test` (ruff și testele rapide, din lock), apoi
   build-ul, `SHA256SUMS.txt`, SBOM-ul CycloneDX și publicarea release-ului. Tag-ul trebuie să fie egal cu versiunea
   din cod. Inno Setup are versiunea fixată (`choco install innosetup --version 6.7.1`); o versiune
@@ -325,7 +328,8 @@ convertor/
   gui/            interfața (ttkbootstrap + tkinterdnd2), instanță unică, progres în taskbar
 tests/            pytest
 installer/        script Inno Setup + traducerea română a installer-ului
-tools/            runtime_requirements.py: dependențele aplicației pentru SBOM
+tools/            runtime_requirements.py: dependențele aplicației pentru SBOM;
+                  check_lock.py: lock-ul sincronizat cu requirements (CI)
 CHANGELOG.md      istoricul versiunilor
 ```
 
