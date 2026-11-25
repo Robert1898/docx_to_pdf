@@ -20,9 +20,9 @@ NO_PASSWORD = "\u0001convertor-no-password"
 
 MSO_AUTOMATION_SECURITY_FORCE_DISABLE = 3  # macro-urile nu ruleaza la deschidere
 
-# coduri HRESULT care inseamna ca procesul Office a murit sau nu mai raspunde
 OFFICE_DIED = "Aplicația Office s-a închis neașteptat."
 
+# coduri HRESULT care inseamna ca procesul Office a murit sau nu mai raspunde
 DEAD_SERVER_CODES = {
     -2147023174,  # RPC_S_SERVER_UNAVAILABLE
     -2147023170,  # RPC_S_CALL_FAILED

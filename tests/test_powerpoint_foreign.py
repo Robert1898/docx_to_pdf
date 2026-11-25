@@ -152,14 +152,14 @@ def test_timeout_with_foreign_presentation_fails_the_file_but_keeps_powerpoint(
         env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture) -> None:
     fake = FakePowerPoint()
-    fake.block = threading.Event()
+    fake.block = block = threading.Event()
     app = powerpoint(fake)
     env.windows = [7]
     cancelled: list[int] = []
 
     def cancel(thread_id: int) -> bool:
         cancelled.append(thread_id)
-        fake.block.set()
+        block.set()
         return True
 
     monkeypatch.setattr(office.session, "_cancel_call", cancel)
@@ -205,14 +205,14 @@ def test_shared_powerpoint_reference_is_dropped_after_each_file(env: SimpleNames
 def test_abort_with_foreign_presentation_cancels_the_blocked_call(
         env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakePowerPoint()
-    fake.block = threading.Event()
+    fake.block = block = threading.Event()
     app = powerpoint(fake)
     env.windows = [7]
     cancelled: list[int] = []
 
     def cancel(thread_id: int) -> bool:
         cancelled.append(thread_id)
-        fake.block.set()
+        block.set()
         return True
 
     monkeypatch.setattr(office.session, "_cancel_call", cancel)

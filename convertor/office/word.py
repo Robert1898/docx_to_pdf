@@ -17,9 +17,12 @@ class WordApp(OfficeApp):
     progid = "Word.Application"
     image = "WINWORD.EXE"
     name = "Microsoft Word"
-    # optiunea din registry e „imprumutata” o singura data per instanta, chiar daca Word e
-    # repornit dupa un timeout; se elibereaza la quit()
-    _guarded = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        # optiunea din registry e „imprumutata” o singura data per instanta, chiar daca Word
+        # e repornit dupa un timeout; se elibereaza la quit()
+        self._guarded = False
 
     def _guard(self) -> None:
         if not self._guarded:
@@ -36,7 +39,7 @@ class WordApp(OfficeApp):
         ResiliencyCleaner.clean()  # inainte ca Word sa-si incarce lista la pornire
         try:
             super().start()
-        except Exception:
+        except Exception:  # intentionat larg: doar curatenie, eroarea merge mai departe
             self._unguard()
             raise
         # dupa un timeout, Word tocmai a marcat fisierul la care l-am oprit

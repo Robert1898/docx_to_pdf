@@ -91,6 +91,7 @@ def _content_rects(ws: Any) -> list[excelarea.Rect]:
         bounds = _find_bounds(ws)
         rects = [excelarea.clamp(bounds, used_rect)] if bounds else []
     for shape in ws.Shapes:
+        # intentionat larg: o forma ciudata (COM) e doar sarita
         with contextlib.suppress(Exception):
             if shape.Visible:
                 top_left, bottom_right = shape.TopLeftCell, shape.BottomRightCell
@@ -208,15 +209,15 @@ class ExcelApp(OfficeApp):
         log.warning("%s (pid %s) are %d registru(e) deschis(e) de altcineva; nu il inchid si "
                     "nu il opresc, il las vizibil utilizatorului", self.name, self.pid, foreign)
         # fiecare separat: o setare refuzata nu are voie sa lase instanta ascunsa
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):  # intentionat larg: COM
             self.app.DisplayAlerts = True
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):  # intentionat larg: COM
             self.app.ScreenUpdating = True
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):  # intentionat larg: COM
             self.app.EnableEvents = True
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):  # intentionat larg: COM
             self.app.Visible = True
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):  # intentionat larg: COM
             self.app.UserControl = True  # ramane deschis dupa ce eliberam referinta
         return False
 
@@ -294,9 +295,9 @@ class ExcelApp(OfficeApp):
                     log.debug("Zona de tiparire pentru %r: %s", ws.Name, describe_error(exc))
             # foile fara continut ar da doar pagini goale; macar una ramane vizibila
             for ws in empty[: len(empty) - (len(empty) == len(visible))]:
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception):  # intentionat larg: COM, foaia ramane vizibila
                     ws.Visible = XL_SHEET_HIDDEN
                     log.info("Foaia %r e goala, o sar", ws.Name)
         finally:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception):  # intentionat larg: COM, doar viteza
                 self.app.PrintCommunication = True

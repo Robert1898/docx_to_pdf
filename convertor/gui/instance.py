@@ -77,7 +77,7 @@ class _NullListener:
 class InstanceServer(threading.Thread):
     """Primeste mesajele instantelor pornite ulterior (in fundal)."""
 
-    def __init__(self, listener: Listener, on_message: Callable[[Message], None]) -> None:
+    def __init__(self, listener: Listener, on_message: Callable[[Message], object]) -> None:
         super().__init__(name="instance-server", daemon=True)
         self.listener = listener
         self.on_message = on_message

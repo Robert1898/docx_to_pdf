@@ -10,6 +10,10 @@ import logging
 import tkinter as tk
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import ImageTk
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +39,7 @@ GLYPHS = {
     "sync": "\ue895",
     "zoom": "\ue71e",
 }
-_images: dict[tuple, tk.PhotoImage] = {}  # referinte pastrate, altfel Tk sterge imaginea
+_images: dict[tuple, ImageTk.PhotoImage] = {}  # referinte pastrate, altfel Tk sterge imaginea
 
 
 @cache
@@ -47,7 +51,7 @@ def _font_path() -> str | None:
 
 
 def icon(name: str, color: str = "#5f6b7a", size: int = 16, mirror: bool = False
-         ) -> tk.PhotoImage | None:
+         ) -> ImageTk.PhotoImage | None:
     key = (name, color, size, mirror)
     if key in _images:
         return _images[key]
@@ -66,7 +70,7 @@ def icon(name: str, color: str = "#5f6b7a", size: int = 16, mirror: bool = False
         if mirror:
             image = ImageOps.mirror(image)
         photo = ImageTk.PhotoImage(image)
-    except Exception as exc:  # doar decorativ
+    except (ImportError, OSError, ValueError, tk.TclError) as exc:  # doar decorativ
         log.debug("Iconita %s: %s", name, exc)
         return None
     _images[key] = photo

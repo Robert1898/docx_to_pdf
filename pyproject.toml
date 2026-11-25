@@ -53,3 +53,11 @@ markers = [
 ]
 # faulthandler raporteaza ca „fatal” deconectarile COM tratate (cand oprim Word in teste)
 addopts = "-ra -p no:faulthandler"
+
+[tool.pyright]
+include = ["convertor", "tests", "tools"]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+pythonPlatform = "Windows"
+# stub-urile pywin32 ale lui pyright pun win32com.shell sub win32com, codul e in win32comext
+reportMissingModuleSource = "none"

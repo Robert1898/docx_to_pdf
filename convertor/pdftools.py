@@ -52,7 +52,7 @@ def open_pdf(path: Path) -> PdfReader:
 
     try:
         reader = PdfReader(path)
-    except Exception as exc:
+    except Exception as exc:  # intentionat larg: pypdf arunca multe tipuri pe fisiere stricate
         raise PdfError(_("Nu pot citi PDF-ul: {error}").format(error=exc)) from exc
     if reader.is_encrypted and not reader.decrypt(""):
         raise PdfError(_("PDF-ul este protejat cu parolă."))
@@ -320,6 +320,7 @@ def compress(src: Path, dst: Path, level: str = "balanced",
                 if pil.mode not in ("RGB", "L"):
                     pil = pil.convert("RGB")
                 image.replace(pil, quality=quality)
+            # intentionat larg: o imagine pe care PIL/pypdf nu o pot rescrie ramane
             except Exception as exc:
                 log.debug("Imagine lasata neschimbata in %s: %s", src, exc)
         page.compress_content_streams()
@@ -415,7 +416,8 @@ def pdf_to_images(src: Path, out_dir: Path, fmt: str = "png", dpi: int = 150,
         for index in range(total):
             if cancel is not None and cancel.is_set():
                 raise Cancelled
-            image = document[index].render(scale=dpi / 72).to_pil()
+            # pypdfium2 accepta scale float (documentat); adnotarea dedusa din implicit e int
+            image = document[index].render(scale=dpi / 72).to_pil()  # pyright: ignore[reportArgumentType]
             dst = out_dir / f"{src.stem} - {_('pagina')} {index + 1:0{width}}.{fmt}"
             if fmt == "jpg":
                 image.convert("RGB").save(dst, quality=88, dpi=(dpi, dpi))
@@ -543,7 +545,8 @@ def ocr(
             for index in range(total):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled
-                image = document[index].render(scale=OCR_DPI / 72).to_pil().convert("RGB")
+                image = (document[index].render(scale=OCR_DPI / 72)  # pyright: ignore[reportArgumentType]
+                         .to_pil().convert("RGB"))
                 img_path = Path(tmp) / f"p{index:05}.jpg"
                 image.save(img_path, quality=80, dpi=(OCR_DPI, OCR_DPI))
                 base = Path(tmp) / f"p{index:05}"

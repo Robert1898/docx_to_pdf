@@ -24,6 +24,17 @@ def progid_available(progid: str) -> bool:
         return False
 
 
+def word_version() -> str:
+    """Versiunea Office a lui Word instalat, de ex. „16.0” (din cheia CurVer a lui
+    Word.Application). OSError daca Word nu e instalat sau versiunea nu poate fi citita."""
+    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Word.Application\CurVer") as key:
+        progid = winreg.QueryValue(key, None)  # "Word.Application.16"
+    major = progid.rpartition(".")[2]
+    if not major.isdigit():
+        raise OSError(f"Versiune Word necunoscuta: {progid!r}")
+    return f"{major}.0"
+
+
 # --- optiunea lui Word care afiseaza un mesaj la deschiderea PDF-urilor -----------------
 
 
@@ -45,9 +56,7 @@ class PdfWarningGuard:
 
     @staticmethod
     def _options_key() -> str:
-        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Word.Application\CurVer") as key:
-            major = winreg.QueryValue(key, None).rsplit(".", 1)[1]  # "Word.Application.16"
-        return rf"Software\Microsoft\Office\{major}.0\Word\Options"
+        return rf"Software\Microsoft\Office\{word_version()}\Word\Options"
 
     @classmethod
     def suppress(cls) -> None:
@@ -166,8 +175,7 @@ class ResiliencyCleaner:
 
     @classmethod
     def root(cls) -> str:
-        version = PdfWarningGuard._options_key().split("\\")[3]  # "16.0"
-        return cls.ROOT.format(version=version)
+        return cls.ROOT.format(version=word_version())
 
     @staticmethod
     def _values(key: winreg.HKEYType) -> list[tuple[str, object]]:

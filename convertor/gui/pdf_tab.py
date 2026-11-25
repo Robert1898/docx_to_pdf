@@ -22,6 +22,9 @@ from .convert_tab import IMAGES, choice_box
 from .widgets import Column, FileTable, UiQueue, icon_button, tooltip
 
 if TYPE_CHECKING:
+    from PIL import Image
+
+if TYPE_CHECKING:
     from .app import App
 
 log = logging.getLogger(__name__)
@@ -288,7 +291,7 @@ class PdfToolsTab(ttk.Frame):
 
         threading.Thread(target=render, name="preview", daemon=True).start()
 
-    def _show_preview(self, image: object) -> None:
+    def _show_preview(self, image: Image.Image | None) -> None:
         if image is None:
             self.preview_label.configure(image="", text=_("fără previzualizare"))
             return
@@ -594,6 +597,7 @@ class PdfToolsTab(ttk.Frame):
     def _guard(self, work: Callable[[], None]) -> None:
         try:
             work()
+        # intentionat larg: firul de lucru anunta orice eroare in interfata
         except Exception as exc:
             log.exception("Unealta PDF a esuat")
             message = str(exc)
@@ -607,6 +611,7 @@ class PdfToolsTab(ttk.Frame):
                                                         tag="running"))
         try:
             replaced = pdftools.merge(files, dst, renumber=renumber)
+        # intentionat larg: firul de lucru anunta orice eroare in interfata
         except Exception as exc:
             message = str(exc)
             for iid in rows:
@@ -642,7 +647,7 @@ class PdfToolsTab(ttk.Frame):
             except pdftools.Cancelled:
                 self.ui.post(lambda iid=iid: self.table.set(iid, "status", _("Anulat"),
                                                             tag="muted"))
-            except Exception as exc:
+            except Exception as exc:  # intentionat larg: un fisier esuat nu opreste restul listei
                 failures += 1
                 log.warning("Unealta PDF pe %s: %s", src, exc)
                 message = str(exc)
@@ -672,7 +677,7 @@ class PdfToolsTab(ttk.Frame):
         self.status.set(_("Se oprește după fișierul curent…"))
 
 
-def _thumbnail(path: Path, width: int) -> object:
+def _thumbnail(path: Path, width: int) -> Image.Image:
     """Prima pagina a unui PDF (sau imaginea) micsorata la latimea data."""
     from PIL import Image, ImageOps
 

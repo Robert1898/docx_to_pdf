@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from pypdf import PdfReader
+from pypdf.generic import Destination
 
 from convertor.core import ExportOptions, Kind, plan_jobs
 from convertor.engine import Engine, Status
@@ -109,7 +110,10 @@ def test_word_to_pdf_with_bookmarks_and_pdfa(samples, tmp_path: Path) -> None:
     [result] = run([samples["docx"]], tmp_path, bookmarks=True, pdfa=True)
     assert result.status is Status.DONE, result.message
     reader = PdfReader(result.job.dst)
-    assert [item.title for item in reader.outline] == ["Capitol unu", "Capitol doi"]
+    outline = reader.outline
+    assert all(isinstance(item, Destination) for item in outline)  # fara sub-capitole
+    assert [item.title for item in outline if isinstance(item, Destination)] == [
+        "Capitol unu", "Capitol doi"]
     assert "ăîșțâ" in reader.pages[0].extract_text()
     assert reader.xmp_metadata is not None and reader.xmp_metadata.pdfaid_part
     assert registry_value() == before
@@ -313,7 +317,7 @@ def test_timeout_kills_word_then_recovers_and_cleans_up(
         # primul fisier primeste o limita imposibila: Word e oprit in timp ce il deschide
         calls.append(job)
         if len(calls) == 1:
-            options = ExportOptions(timeout=0.05)  # type: ignore[arg-type]
+            options = ExportOptions(timeout=0.05)
         return real_convert(self, job, options, src)
 
     monkeypatch.setattr(office.OfficeSession, "convert", convert)

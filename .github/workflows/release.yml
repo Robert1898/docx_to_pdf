@@ -62,6 +62,24 @@ jobs:
         shell: pwsh
         run: .\build.ps1 -SkipTests   # testele au rulat in job-ul „test”
 
+      # Doar bibliotecile incluse in aplicatie (fara uneltele de dezvoltare din lock), instalate
+      # cu hash-uri intr-un mediu separat, fara pip, ca sa nu apara in lista.
+      - name: SBOM CycloneDX
+        shell: pwsh
+        run: |
+          $v = (.venv\Scripts\python.exe -c "import convertor; print(convertor.__version__)").Trim()
+          .venv\Scripts\python.exe tools\runtime_requirements.py requirements.lock -o dist\runtime.lock
+          .venv\Scripts\python.exe -m venv --without-pip .sbom-venv
+          .venv\Scripts\python.exe -m pip --python .sbom-venv\Scripts\python.exe install `
+            --require-hashes --no-deps -r dist\runtime.lock
+          # versiunea e dinamica in pyproject.toml; cyclonedx-py o vrea scrisa
+          (Get-Content pyproject.toml -Raw) -replace 'dynamic = \["version"\]', "version = `"$v`"" |
+            Set-Content -NoNewline -Encoding utf8 .sbom-pyproject.toml
+          .venv\Scripts\cyclonedx-py.exe environment .sbom-venv\Scripts\python.exe `
+            --pyproject .sbom-pyproject.toml --mc-type application --output-reproducible `
+            --of JSON -o "dist\installer\document-converter-$v.cdx.json"
+          if (-not (Test-Path "dist\installer\document-converter-$v.cdx.json")) { throw "SBOM lipsa" }
+
       - name: Sume de control (SHA256SUMS.txt, verificat de actualizarea din aplicatie)
         shell: pwsh
         run: |
@@ -78,5 +96,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create $env:TAG (Get-ChildItem dist\installer\*.exe) `
-            dist\installer\SHA256SUMS.txt `
+            dist\installer\SHA256SUMS.txt (Get-ChildItem dist\installer\*.cdx.json) `
             --title $env:TAG --generate-notes

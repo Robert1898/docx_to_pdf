@@ -11,9 +11,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .i18n import _
 from .pdftools import PdfError, _write, open_pdf
+
+if TYPE_CHECKING:
+    from pypdf import PageObject
 
 
 @dataclass
@@ -39,7 +43,7 @@ def initial(path: Path) -> list[PageEdit]:
     return [PageEdit(i) for i in range(len(open_pdf(path).pages))]
 
 
-def _stamp_page(width: float, height: float, stamps: Sequence[Stamp]) -> object:
+def _stamp_page(width: float, height: float, stamps: Sequence[Stamp]) -> PageObject:
     from PIL import Image
     from pypdf import PdfReader
     from reportlab.lib.utils import ImageReader

@@ -1,5 +1,9 @@
 # Document Converter
 
+[![CI](https://github.com/Robert1898/docx_to_pdf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Robert1898/docx_to_pdf/actions/workflows/ci.yml)
+[![Release](https://github.com/Robert1898/docx_to_pdf/actions/workflows/release.yml/badge.svg)](https://github.com/Robert1898/docx_to_pdf/actions/workflows/release.yml)
+[![Ultima versiune](https://img.shields.io/github/v/release/Robert1898/docx_to_pdf)](https://github.com/Robert1898/docx_to_pdf/releases/latest)
+
 Aplicație Windows care convertește în masă documente Office și imagini în PDF, iar PDF-uri în
 DOCX sau Excel, plus unelte PDF (unire, împărțire, compresie, organizare pagini, semnătură, OCR).
 Totul rulează **local, offline**: documentele nu pleacă de pe calculator (singura conexiune la
@@ -233,6 +237,9 @@ python -m venv .venv
 .venv\Scripts\python -m ruff check .
 ```
 ```bash
+.venv\Scripts\python -m pyright --pythonpath .venv\Scripts\python.exe
+```
+```bash
 .venv\Scripts\python -m pytest -m "not office and not ocr"
 ```
 ```bash
@@ -274,15 +281,21 @@ Fără `--upgrade` păstrează versiunile existente și adaugă doar ce lipseșt
 venv nou: `pip install --require-hashes -r requirements.lock`, ruff și testele rapide.
 
 ### CI/CD
-- `ci.yml` (la push pe `main` și la pull request): ruff și testele rapide pe Python 3.11–3.14;
-  raportul de acoperire (`coverage.xml`) e salvat ca artefact pentru fiecare versiune.
+- `ci.yml` (la push pe `main` și la pull request): ruff, pyright (mod `basic`, configurat în
+  `pyproject.toml`) și testele rapide pe Python 3.11–3.14; raportul de acoperire
+  (`coverage.xml`) e salvat ca artefact pentru fiecare versiune.
 - `release.yml` (la un tag `v*`): întâi job-ul `test` (ruff și testele rapide, din lock), apoi
-  build-ul, `SHA256SUMS.txt` și publicarea release-ului. Tag-ul trebuie să fie egal cu versiunea
+  build-ul, `SHA256SUMS.txt`, SBOM-ul CycloneDX și publicarea release-ului. Tag-ul trebuie să fie egal cu versiunea
   din cod. Inno Setup are versiunea fixată (`choco install innosetup --version 6.7.1`); o versiune
   nouă se schimbă manual în `release.yml`.
 - Toate acțiunile sunt fixate pe SHA-ul unui commit (versiunea e în comentariu);
   `.github/dependabot.yml` propune săptămânal actualizări pentru acțiuni și dependențele pip.
 - Testele rapide folosesc peste tot aceiași markeri: `-m "not office and not ocr"`.
+- SBOM-ul (`document-converter-<versiune>.cdx.json`) descrie bibliotecile incluse în aplicație.
+  `tools/runtime_requirements.py` păstrează din `requirements.lock` doar dependențele aplicației,
+  fără uneltele de dezvoltare. Ele sunt instalate, cu hash-uri, într-un mediu separat, iar
+  `cyclonedx-py` face lista din acel mediu.
+- Schimbările pentru utilizatori sunt notate în [CHANGELOG.md](CHANGELOG.md).
 
 ### Structura
 ```
@@ -312,6 +325,8 @@ convertor/
   gui/            interfața (ttkbootstrap + tkinterdnd2), instanță unică, progres în taskbar
 tests/            pytest
 installer/        script Inno Setup + traducerea română a installer-ului
+tools/            runtime_requirements.py: dependențele aplicației pentru SBOM
+CHANGELOG.md      istoricul versiunilor
 ```
 
 ## Licență

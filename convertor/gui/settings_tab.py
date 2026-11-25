@@ -410,7 +410,7 @@ class SettingsTab(Scrollable):
                 shell.create_sendto()
             else:
                 shell.remove_sendto()
-        except Exception as exc:
+        except Exception as exc:  # intentionat larg: eroarea COM/Win32 e aratata utilizatorului
             log.exception("Trimite catre")
             messagebox.showerror(_("Integrare Windows"), str(exc), parent=self)
         self.sendto.set(shell.sendto_registered())

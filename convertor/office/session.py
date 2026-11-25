@@ -118,6 +118,7 @@ class OfficeSession:
                 self._current = (app, opened, done)
             timer.start()
             app.convert(job, options, opened)
+        # intentionat larg: orice eroare COM devine mesaj pentru utilizator
         except Exception as exc:
             dialog = (" " + _("Dialog: „{text}”").format(text=watcher.last_text)
                       if watcher and watcher.last_text else "")

@@ -22,7 +22,8 @@ def translatable() -> set[str]:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and node.func.id == "_" and node.args
-                    and isinstance(node.args[0], ast.Constant)):
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
                 found.add(node.args[0].value)
     return found
 

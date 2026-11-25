@@ -5,7 +5,9 @@ import io
 import re
 import tempfile
 import urllib.request
+from http.client import HTTPMessage
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,8 +27,8 @@ class FakeResponse(io.BytesIO):
         self.headers = {"Content-Length": str(len(body))}
 
 
-def release(**changes) -> updater.Release:
-    values = dict(version="9.1.0", asset_url=SETUP_URL, asset_name=SETUP,
+def release(**changes: Any) -> updater.Release:
+    values: dict[str, Any] = dict(version="9.1.0", asset_url=SETUP_URL, asset_name=SETUP,
                   asset_size=len(INSTALLER), page_url="https://github.com/o/r/releases/v9.1.0",
                   notes="", checksums_url=SUMS_URL)
     values.update(changes)
@@ -213,8 +215,9 @@ def test_download_incomplete(monkeypatch: pytest.MonkeyPatch, temp_dir: Path) ->
 def test_redirect_to_foreign_domain_is_refused() -> None:
     handler = updater._CheckedRedirects()
     request = urllib.request.Request(SETUP_URL)
-    allowed = handler.redirect_request(request, None, 302, "Found", {},
+    allowed = handler.redirect_request(request, io.BytesIO(), 302, "Found", HTTPMessage(),
                                        "https://release-assets.githubusercontent.com/x")
     assert allowed is not None
     with pytest.raises(updater.UpdateError, match=r"evil\.example"):
-        handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/x")
+        handler.redirect_request(request, io.BytesIO(), 302, "Found", HTTPMessage(),
+                                 "https://evil.example/x")

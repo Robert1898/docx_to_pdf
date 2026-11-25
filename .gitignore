@@ -8,3 +8,6 @@ __pycache__/
 *.part
 .coverage
 coverage.xml
+# SBOM (release.yml)
+.sbom-venv/
+.sbom-pyproject.toml

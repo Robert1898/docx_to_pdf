@@ -99,7 +99,7 @@ class PowerPointApp(OfficeApp):
                     True,  # BitmapMissingFonts
                     options.pdfa,  # UseISO19005_1
                 )
-            except Exception as exc:
+            except Exception as exc:  # intentionat larg: orice esec al exportului incearca SaveAs
                 if self.abandoned:  # apel anulat la timeout: PowerPoint e inca blocat
                     raise
                 # ultima solutie: SaveAs merge mereu, dar fara optiuni

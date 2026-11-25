@@ -195,7 +195,7 @@ def download(release: Release, progress: Callable[[int, int], None] | None = Non
                         sha.hexdigest(), expected)
             raise UpdateError(_("Installer-ul descărcat nu se potrivește cu suma de control "
                                 "din release; l-am șters."))
-    except BaseException:
+    except BaseException:  # intentionat larg: curatenie si la Ctrl+C, eroarea merge mai departe
         shutil.rmtree(folder, ignore_errors=True)
         raise
     log.info("Installer verificat: %s (sha256 %s)", dst.name, expected)

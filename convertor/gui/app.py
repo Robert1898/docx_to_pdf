@@ -13,6 +13,7 @@ import traceback
 from collections.abc import Sequence
 from pathlib import Path
 from tkinter import messagebox
+from types import TracebackType
 from typing import Any
 
 import ttkbootstrap as ttk
@@ -44,7 +45,7 @@ def _make_root() -> tk.Tk:
         from tkinterdnd2 import TkinterDnD
 
         return TkinterDnD.Tk()
-    except Exception as exc:
+    except (ImportError, RuntimeError, tk.TclError) as exc:  # pachet sau biblioteca tkdnd lipsa
         log.warning("tkdnd indisponibil, fara drag & drop: %s", exc)
         return tk.Tk()
 
@@ -136,7 +137,7 @@ class App:
         """Notificare discreta in coltul ecranului, fara sa blocheze fereastra."""
         try:
             ttk.ToastNotification(title=title, message=message, duration=4000).show_toast()
-        except Exception as exc:
+        except tk.TclError as exc:
             log.debug("Toast indisponibil: %s", exc)
 
     def bring_to_front(self) -> None:
@@ -313,7 +314,8 @@ class App:
         self.root.destroy()
         return True
 
-    def _on_tk_error(self, exc: type[BaseException], value: BaseException, tb: object) -> None:
+    def _on_tk_error(self, exc: type[BaseException], value: BaseException,
+                     tb: TracebackType | None) -> None:
         log.error("Eroare neasteptata:\n%s", "".join(traceback.format_exception(exc, value, tb)))
         messagebox.showerror(
             _("Eroare neașteptată"),

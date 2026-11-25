@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from PIL import Image
@@ -73,7 +73,7 @@ def test_pool_grows_for_large_batches(fake_office: type[FakeSession]) -> None:
 def test_pool_propagates_errors(fake_office: type[FakeSession]) -> None:
     pool = engine.OfficePool(1, idle_timeout=5)
     try:
-        def boom(session: FakeSession) -> None:
+        def boom(session: object) -> None:
             raise ValueError("stricat")
 
         with pytest.raises(ValueError, match="stricat"):
@@ -88,8 +88,10 @@ def test_on_idle_only_when_the_batch_is_done(fake_office: type[FakeSession]) -> 
     gate = threading.Event()
     seen: list[int] = []
     try:
-        first = pool.submit(lambda s: (gate.wait(5), seen.append(s.idle_calls)))
-        rest = [pool.submit(lambda s: seen.append(s.idle_calls)) for _ in range(2)]
+        # sesiunile din pool sunt FakeSession (fixture-ul fake_office)
+        first = pool.submit(lambda s: (gate.wait(5), seen.append(cast(FakeSession, s).idle_calls)))
+        rest = [pool.submit(lambda s: seen.append(cast(FakeSession, s).idle_calls))
+                for _ in range(2)]
         gate.set()
         for future in [first, *rest]:
             future.result(5)

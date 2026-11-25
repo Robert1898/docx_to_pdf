@@ -174,7 +174,7 @@ class PagesTab(ttk.Frame):
                 page.close()
                 self.ui.post(lambda i=index, img=image, g=generation: self._thumb_ready(
                     i, img, g))
-        except Exception as exc:
+        except Exception as exc:  # intentionat larg: PDF stricat; miniaturile lipsesc, restul merge
             log.warning("Miniaturi %s: %s", path, exc)
         finally:
             document.close()
@@ -261,14 +261,16 @@ class PagesTab(ttk.Frame):
         self.canvas.focus_set()
         pos = self._position_at(event)
         self._dragged = False
+        # la clic, state e masca tastelor (int); Tk il da ca text doar la alte evenimente
+        state = event.state if isinstance(event.state, int) else 0
         if pos is None:
             self.selected.clear()
             self._drag_from = None
-        elif event.state & 0x0001 and self.anchor is not None:  # Shift: interval
+        elif state & 0x0001 and self.anchor is not None:  # Shift: interval
             low, high = sorted((self.anchor, pos))
             self.selected = set(range(low, high + 1))
             self._drag_from = None
-        elif event.state & 0x0004:  # Ctrl: adauga / scoate
+        elif state & 0x0004:  # Ctrl: adauga / scoate
             self.selected ^= {pos}
             self.anchor = pos
             self._drag_from = None
@@ -387,6 +389,7 @@ class PagesTab(ttk.Frame):
         def work() -> None:
             try:
                 pageedit.save(src, edits, dst)
+            # intentionat larg: firul de lucru anunta orice eroare in interfata
             except Exception as exc:
                 log.exception("Salvare pagini")
                 message = str(exc)

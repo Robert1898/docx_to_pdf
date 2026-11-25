@@ -297,12 +297,12 @@ def _font_file(pdf_font: str, bold: bool) -> Path | None:
 @cache
 def _register(path: Path) -> str:
     from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase.ttfonts import TTFError, TTFont
 
     name = f"PageNumber-{_normalize(path.stem)}"
     try:
         pdfmetrics.registerFont(TTFont(name, str(path)))
-    except Exception as exc:  # font cu restrictii sau format neasteptat
+    except (TTFError, OSError) as exc:  # font cu restrictii sau format neasteptat
         log.debug("Nu pot folosi fontul %s: %s", path, exc)
         return "Helvetica-Bold" if "bold" in path.stem.lower() else "Helvetica"
     return name

@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from .core import Job, collect_files, free_path, plan_jobs
 from .paths import state_dir
@@ -79,6 +79,7 @@ class Entry:
             data = {"fp": data, "status": DONE}
         if not isinstance(data, dict):
             return None
+        data = cast("dict[str, Any]", data)  # valori din JSON: verificate de conversiile de jos
         try:
             mtime, size = data["fp"]
             entry = cls((float(mtime), int(size)), str(data.get("status", DONE)),

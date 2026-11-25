@@ -6,6 +6,7 @@ Excel, conversii in paralel (--jobs) si urmarirea unui folder (--watch)."""
 from __future__ import annotations
 
 import argparse
+import io
 import logging
 import sys
 import time
@@ -135,7 +136,7 @@ def _watch(args: argparse.Namespace, options: ExportOptions) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
-        if stream is not None and hasattr(stream, "reconfigure"):
+        if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(errors="replace")
 
     i18n.set_language(settings.load().language)
