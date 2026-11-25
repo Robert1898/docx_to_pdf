@@ -19,7 +19,7 @@ dependencies = [
     "pypdf>=5.0",
     "pycryptodome>=3.20",
     "reportlab>=4.0",
-    "pypdfium2>=4.30",
+    "pypdfium2>=5.15.2",
     "Pillow>=10.0",
 ]
 
