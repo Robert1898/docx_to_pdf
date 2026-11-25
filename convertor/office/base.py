@@ -163,6 +163,10 @@ class OfficeApp:
             log.info("%s (pid %s) inca rula la %.0f s dupa Quit; l-am oprit",
                      self.name, self.pid, grace)
 
+    def release_abandoned(self) -> None:
+        """Ultimele apeluri inainte sa renuntam la o instanta pe care nu o putem opri (de ex.
+        setari globale de refacut). Instanta poate fi inca blocata: apelantul pune o limita."""
+
     def has_foreign_documents(self) -> bool:
         """Instanta are documente deschise de altcineva? Apelat din alt fir, cat timp aplicatia
         poate fi blocata, deci fara COM."""

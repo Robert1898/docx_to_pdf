@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -180,3 +181,108 @@ def test_convert_counts_its_open_workbooks(monkeypatch: pytest.MonkeyPatch,
     with pytest.raises(OSError):
         app.convert(job, ExportOptions(), job.src)
     assert app.open_workbooks == 1  # inca deschis: nu e numarat ca strain
+
+
+@pytest.fixture
+def blocked(monkeypatch: pytest.MonkeyPatch, process: list[str]) -> SimpleNamespace:
+    """Excel simulat al carui export ramane blocat pana la anulare; ferestre si opriri false."""
+    state = SimpleNamespace(windows=[], killed=[], cancelled=[], release=threading.Event())
+    monkeypatch.setattr(office.excel, "_visible_windows", lambda pid, classes: list(state.windows))
+    monkeypatch.setattr(office.base, "_kill", state.killed.append)
+    monkeypatch.setattr(office.ExcelApp, "_limit_to_content", lambda self, wb: None)
+
+    def cancel(thread_id: int) -> bool:
+        state.cancelled.append(thread_id)
+        state.release.set()
+        return True
+
+    monkeypatch.setattr(office.session, "_cancel_call", cancel)
+    return state
+
+
+class BlockingWorkbook(FakeWorkbook):
+    def ExportAsFixedFormat(self, **kwargs) -> None:
+        assert self.excel.release.wait(5), "apelul nu a fost anulat"
+        raise OSError("Call was canceled by the message filter.")
+
+    def Close(self, SaveChanges: bool) -> None:
+        self.excel.closed = True
+        super().Close(SaveChanges)
+
+
+class BlockingExcel(FakeExcel):
+    def __init__(self, release: threading.Event, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.release, self.closed = release, False
+        self.Workbooks.Open = lambda **kw: self._open()
+
+    def _open(self) -> BlockingWorkbook:
+        self.Workbooks.Count += 1
+        return BlockingWorkbook(self)
+
+
+def excel_session(app: office.ExcelApp) -> office.OfficeSession:
+    session = office.OfficeSession()
+    session._apps[office.ExcelApp] = app
+    session._thread_id = 1
+    return session
+
+
+def test_timeout_with_foreign_workbook_fails_the_file_but_keeps_excel(
+        blocked: SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
+    fake = BlockingExcel(blocked.release)
+    app = excel_app(fake)
+    blocked.windows = [9]  # fereastra XLMAIN vizibila: altcineva lucreaza in instanta
+    session = excel_session(app)
+    job = Job(Path("a.xlsx"), Path("a.pdf"), Kind.EXCEL)
+    with caplog.at_level(logging.WARNING, logger="convertor.office"), \
+            pytest.raises(office.ConversionTimeout, match="documente deschise de utilizator"):
+        session.convert(job, ExportOptions(timeout=0.2))
+    assert blocked.cancelled == [1]
+    assert blocked.killed == []
+    assert fake.closed is False  # fara Close in Excel-ul blocat
+    assert fake.quit_calls == []
+    assert fake.IgnoreRemoteRequests is False  # setarea globala refacuta inainte de abandon
+    assert app.app is None
+    assert "are documente deschise de altcineva" in caplog.text
+
+
+def test_abort_with_foreign_workbook_cancels_the_blocked_call(blocked: SimpleNamespace) -> None:
+    fake = BlockingExcel(blocked.release, workbooks=1)  # registru strain deja deschis
+    app = excel_app(fake)
+    session = excel_session(app)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            session.convert(Job(Path("a.xlsx"), Path("a.pdf"), Kind.EXCEL), ExportOptions())
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    while session._current is None and worker.is_alive():
+        threading.Event().wait(0.01)
+    session.kill_all()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert [type(e) for e in errors] == [office.ConversionTimeout]
+    assert blocked.killed == []
+    assert fake.IgnoreRemoteRequests is False
+    # registrul strain ramane la vedere, in grija utilizatorului
+    assert (fake.Visible, fake.UserControl) == (True, True)
+
+
+def test_foreign_workbook_counted_before_open_blocks_kill(blocked: SimpleNamespace) -> None:
+    fake = FakeExcel(workbooks=1)
+    app = excel_app(fake)
+    app.convert(Job(Path("a.xlsx"), Path("a.pdf"), Kind.EXCEL), ExportOptions(), Path("a.xlsx"))
+    assert app.foreign_seen is True
+    assert app.kill() is False
+    assert blocked.killed == []
+
+
+def test_kill_without_foreign_workbooks(blocked: SimpleNamespace) -> None:
+    app = excel_app(FakeExcel())
+    assert app.kill() is True
+    assert blocked.killed == [1234]

@@ -15,6 +15,7 @@ from .base import (
     OfficeApp,
     describe_error,
 )
+from .process import _visible_windows
 
 log = logging.getLogger(__package__)  # un singur jurnal pentru tot pachetul
 
@@ -163,6 +164,7 @@ class ExcelApp(OfficeApp):
         super().__init__()
         self.open_workbooks = 0  # registrele deschise acum de noi in aceasta instanta
         self._remote_requests: bool | None = None  # valoarea initiala, cat timp e schimbata
+        self.foreign_seen = False  # ultima numaratoare (COM) a gasit registre straine
 
     def _window_handle(self) -> int | None:
         return int(self.app.Hwnd)  # fereastra principala, exista si cand Excel e ascuns
@@ -175,6 +177,7 @@ class ExcelApp(OfficeApp):
         self.app.EnableEvents = False
         self.app.AutomationSecurity = MSO_AUTOMATION_SECURITY_FORCE_DISABLE
         self.open_workbooks = 0
+        self.foreign_seen = False
         if self.owned:
             # Altfel un fisier deschis de utilizator din Explorer (DDE) poate ajunge in instanta
             # noastra ascunsa. Setarea e globala si Excel o salveaza in registry la iesire, deci
@@ -191,6 +194,19 @@ class ExcelApp(OfficeApp):
             log.debug("IgnoreRemoteRequests %s: %s", self.name, describe_error(exc))
         finally:
             self._remote_requests = None
+
+    def has_foreign_documents(self) -> bool:
+        # Fara COM (apelat din alt fir, cat timp Excel poate fi blocat): instanta noastra e
+        # ascunsa, deci o fereastra XLMAIN vizibila inseamna ca altcineva lucreaza in ea; plus
+        # numaratoarea facuta de firul nostru inainte de ultima deschidere.
+        if self.foreign_seen:
+            return True
+        return bool(self.pid) and bool(_visible_windows(self.pid, {"XLMAIN"}))
+
+    def release_abandoned(self) -> None:
+        # IgnoreRemoteRequests e globala si Excel o salveaza cand iese singur (de ex. cand
+        # utilizatorul isi inchide registrul): o refacem, iar registrele straine raman la vedere.
+        self.prepare_quit()
 
     def prepare_quit(self) -> bool:
         """Reface IgnoreRemoteRequests; refuza inchiderea daca instanta are registre straine.
@@ -224,6 +240,10 @@ class ExcelApp(OfficeApp):
         return False
 
     def convert(self, job: Job, options: ExportOptions, src: Path) -> None:
+        try:
+            self.foreign_seen = int(self.app.Workbooks.Count) > self.open_workbooks
+        except Exception as exc:  # intentionat larg: o eroare aici apare oricum la Open
+            log.debug("Workbooks.Count %s: %s", self.name, describe_error(exc))
         wb = self.app.Workbooks.Open(
             Filename=str(src),
             UpdateLinks=0,
@@ -246,8 +266,9 @@ class ExcelApp(OfficeApp):
                 OpenAfterPublish=False,
             )
         finally:
-            wb.Close(SaveChanges=False)
-            self.open_workbooks -= 1  # doar daca s-a inchis: altfel e tot al nostru, deschis
+            if not self.abandoned:  # Close ar astepta si el Excel-ul blocat
+                wb.Close(SaveChanges=False)
+                self.open_workbooks -= 1  # doar daca s-a inchis: altfel e tot al nostru, deschis
 
     # Excel tipareste toata zona „folosita” a foii, care poate fi mult mai mare decat datele:
     # formatare pe coloane intregi, formule trase in jos care intorc "", un spatiu uitat.

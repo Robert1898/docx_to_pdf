@@ -198,3 +198,69 @@ def test_shared_powerpoint_reference_is_dropped_after_each_file(env: SimpleNames
     session.convert(Job(Path("a.pptx"), Path("a.pdf"), Kind.POWERPOINT), ExportOptions())
     assert app.app is None
     assert "quit" not in fake.calls
+
+
+def test_abort_with_foreign_presentation_cancels_the_blocked_call(
+        env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakePowerPoint()
+    fake.block = threading.Event()
+    app = powerpoint(fake)
+    env.windows = [7]
+    cancelled: list[int] = []
+
+    def cancel(thread_id: int) -> bool:
+        cancelled.append(thread_id)
+        fake.block.set()
+        return True
+
+    monkeypatch.setattr(office.session, "_cancel_call", cancel)
+    session = session_with(app)
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            session.convert(Job(Path("a.pptx"), Path("a.pdf"), Kind.POWERPOINT), ExportOptions())
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    deadline = threading.Event()
+    while "export" not in fake.calls and not deadline.wait(0.01):
+        pass
+    session.kill_all()  # Anulare / inchiderea aplicatiei, din alt fir
+    worker.join(5)
+    assert not worker.is_alive()  # firul nu mai e blocat
+    assert cancelled
+    assert env.killed == []  # PowerPoint cu prezentarea utilizatorului ramane
+    assert [type(e) for e in errors] == [office.ConversionTimeout]
+    assert "close" not in fake.calls and "saveas" not in fake.calls
+    assert office.powerpoint.POWERPOINT_LOCK.acquire(blocking=False)
+    office.powerpoint.POWERPOINT_LOCK.release()
+
+
+def test_abort_without_foreign_presentation_still_kills(env: SimpleNamespace,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(office.session, "_cancel_call",
+                        lambda tid: pytest.fail("nu se anuleaza cand procesul poate fi oprit"))
+    fake = FakePowerPoint()
+    app = powerpoint(fake)
+    session = session_with(app)
+    session._current = (app, Path("a.pptx"), threading.Event())
+    session.kill_all()
+    assert env.killed == [4321]
+
+
+def test_abandoned_cleanup_has_a_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ultimele apeluri catre o instanta abandonata pot bloca si ele: sunt anulate la limita."""
+    unblock = threading.Event()
+    monkeypatch.setattr(office.session, "ABANDON_CLEANUP_SECONDS", 0.1)
+    monkeypatch.setattr(office.session, "_cancel_call", lambda tid: unblock.set() or True)
+    app = office.PowerPointApp()
+    app.app, app.abandoned = object(), True
+    monkeypatch.setattr(app, "release_abandoned", lambda: unblock.wait(5))
+    session = office.OfficeSession()
+    session._thread_id = 1
+    session._drop_abandoned(app, threading.Event())
+    assert unblock.is_set()
+    assert app.app is None

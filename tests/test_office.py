@@ -386,7 +386,13 @@ def test_powerpoint_with_a_user_presentation_is_left_running(samples, tmp_path: 
 def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
         samples, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """La timeout, o instanta care nu poate fi oprita (documente straine) ramane pornita, dar
-    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza."""
+    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza.
+
+    Excel ramane ocupat cu apelul anulat si refuza refacerea lui IgnoreRemoteRequests
+    (VBA_E_IGNORE); cand iese, il salveaza. Testul reface la final setarea globala."""
+    import pythoncom
+    import win32com.client
+
     from convertor.office import ConversionTimeout, ExcelApp, OfficeSession
     from convertor.office.process import _kill, _pids
 
@@ -399,20 +405,59 @@ def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
     monkeypatch.setattr(ExcelApp, "convert", blocked)
     monkeypatch.setattr(ExcelApp, "has_foreign_documents", lambda self: True)
     [job] = plan_jobs([samples["xlsx"]], tmp_path / "out")
-    pid = None
+    pid = original = None
     try:
         with OfficeSession() as session:
             app = session._app(ExcelApp)
             app.ensure()
-            pid = app.pid
+            pid, original = app.pid, app._remote_requests
             start = time.monotonic()
             with pytest.raises(ConversionTimeout, match="documente deschise de utilizator"):
                 session.convert(job, ExportOptions(timeout=2))
-            assert time.monotonic() - start < 10
+            assert time.monotonic() - start < 15
             assert app.app is None
-            assert pid in _pids("EXCEL.EXE")  # nu a fost oprit
     finally:
         if pid is not None:
-            time.sleep(1)
+            # fara registre si fara referinte, Excel iese singur (si isi salveaza setarile)
+            deadline = time.time() + 45
+            while pid in _pids("EXCEL.EXE") and time.time() < deadline:
+                time.sleep(0.5)
             if pid in _pids("EXCEL.EXE"):
                 _kill(pid)  # pornit de test
+    pythoncom.CoInitialize()
+    try:
+        before = _pids("EXCEL.EXE")
+        fresh = win32com.client.DispatchEx("Excel.Application")
+        new = _pids("EXCEL.EXE") - before
+        try:
+            if bool(fresh.IgnoreRemoteRequests) != original:
+                fresh.IgnoreRemoteRequests = original  # salvat la iesirea curata de mai jos
+        finally:
+            fresh.Quit()
+            fresh = None
+            deadline = time.time() + 20
+            while _pids("EXCEL.EXE") & new and time.time() < deadline:
+                time.sleep(0.2)
+            for left in _pids("EXCEL.EXE") & new:
+                _kill(left)  # pornit de test
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def test_visible_excel_window_counts_as_foreign_work(samples) -> None:
+    """Instanta noastra e ascunsa: o fereastra XLMAIN vizibila inseamna ca altcineva lucreaza
+    in ea, deci nu are voie sa fie oprita fortat."""
+    from convertor.office import ExcelApp, OfficeSession
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+    with OfficeSession() as session:
+        app = session._app(ExcelApp)
+        app.ensure()
+        assert app.has_foreign_documents() is False
+        app.app.Visible = True
+        try:
+            assert app.has_foreign_documents() is True
+            assert app.kill() is False
+        finally:
+            app.app.Visible = False

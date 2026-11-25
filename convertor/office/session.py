@@ -20,6 +20,8 @@ from .word import WordApp
 
 log = logging.getLogger(__package__)  # un singur jurnal pentru tot pachetul
 
+ABANDON_CLEANUP_SECONDS = 3.0  # cat asteptam o instanta abandonata (poate fi inca blocata)
+
 OFFICE_FOR_KIND: dict[Kind, type[OfficeApp]] = {
     Kind.WORD: WordApp,
     Kind.PDF: WordApp,
@@ -35,7 +37,9 @@ class OfficeSession:
         self._apps: dict[type[OfficeApp], OfficeApp] = {}
         self._lock = threading.Lock()
         self._com_ready = False
-        self._current: tuple[OfficeApp, Path] | None = None
+        # aplicatia si fisierul la care lucreaza firul, plus evenimentul „apel terminat”
+        self._current: tuple[OfficeApp, Path, threading.Event] | None = None
+        self._cancel_lock = threading.Lock()  # nicio anulare dupa ce apelul s-a terminat
         self._thread_id: int | None = None  # firul care face apelurile COM
 
     def __enter__(self) -> OfficeSession:
@@ -80,7 +84,13 @@ class OfficeSession:
         if current is not None and isinstance(current[0], WordApp):
             ResiliencyCleaner.remember(current[1])
         for app in apps:
-            app.kill()
+            if app.kill() or current is None or app is not current[0]:
+                continue
+            # Nu poate fi oprit (documente straine sau instanta altcuiva): anulam doar apelul
+            # in curs, ca firul (si POWERPOINT_LOCK) sa fie eliberate. Fara asteptare aici.
+            log.warning("Anulare: %s nu poate fi oprit; anulez doar apelul in curs", app.name)
+            threading.Thread(target=self._abandon, args=(app, current[2]), daemon=True,
+                             name="cancel-call").start()
         ResiliencyCleaner.clean()
 
     def convert(self, job: Job, options: ExportOptions, src: Path | None = None) -> str:
@@ -105,7 +115,7 @@ class OfficeSession:
                 watcher = DialogWatcher(app.pid)
                 watcher.start()
             with self._lock:
-                self._current = (app, opened)
+                self._current = (app, opened, done)
             timer.start()
             app.convert(job, options, opened)
         except Exception as exc:
@@ -118,7 +128,7 @@ class OfficeSession:
                     .format(seconds=options.timeout, app=app.name) + dialog
                 ) from exc
             if app.abandoned:
-                app.reset()  # procesul ramane, dar nu il mai folosim
+                self._drop_abandoned(app, done)
                 raise ConversionTimeout(
                     _("A depășit limita de {seconds} s; {app} are documente deschise de "
                       "utilizator, așa că nu l-am oprit.")
@@ -129,7 +139,7 @@ class OfficeSession:
                 app.reset()
             raise ConversionError(message + dialog) from exc
         finally:
-            done.set()
+            self._stop_cancelling(done)
             if timer is not None:
                 timer.cancel()
             if watcher is not None:
@@ -139,7 +149,7 @@ class OfficeSession:
             if isinstance(app, PowerPointApp) and not app.owned:
                 app.reset()  # instanta altcuiva: nu tinem referinta intre fisiere
         if app.abandoned:  # anularea a venit prea tarziu: fisierul e gata, instanta nu
-            app.reset()
+            self._drop_abandoned(app, done)
         if watcher and watcher.answers:
             return _("am răspuns automat la {count} dialog(uri) {app}").format(
                 count=len(watcher.answers), app=app.name)
@@ -157,7 +167,39 @@ class OfficeSession:
         # apelul nostru blocat, ca fisierul sa fie marcat esuat si firul sa poata continua.
         log.warning("Timeout la %s, dar %s e deschis de utilizator sau are documentele lui; nu il "
                     "opresc, renunt doar la fisier", opened, app.name)
+        self._abandon(app, done)
+
+    def _abandon(self, app: OfficeApp, done: threading.Event) -> None:
+        """Renunta la instanta fara s-o opreasca: anuleaza apelul COM blocat al firului nostru
+        (din alt fir), pana cand firul iese din conversie."""
         app.abandoned = True
-        while self._thread_id is not None and not done.is_set():
-            _cancel_call(self._thread_id)  # apelul blocat poate incepe abia dupa prima cerere
+        self._cancel_until(done)
+
+    def _cancel_until(self, done: threading.Event) -> None:
+        while self._thread_id is not None:
+            with self._cancel_lock:
+                if done.is_set():
+                    return
+                _cancel_call(self._thread_id)  # apelul blocat poate incepe abia dupa cerere
             done.wait(0.5)
+
+    def _stop_cancelling(self, done: threading.Event) -> None:
+        with self._cancel_lock:  # dupa asta nu mai pleaca nicio anulare pentru acest apel
+            done.set()
+
+    def _drop_abandoned(self, app: OfficeApp, done: threading.Event) -> None:
+        """Ultimele apeluri catre o instanta abandonata (de ex. setarile globale refacute), cu
+        limita de timp, apoi renuntam la ea. Procesul ramane pornit."""
+        self._stop_cancelling(done)
+        finished = threading.Event()
+        canceller = threading.Timer(ABANDON_CLEANUP_SECONDS, self._cancel_until, args=(finished,))
+        canceller.daemon = True
+        canceller.start()
+        try:
+            app.release_abandoned()
+        except Exception as exc:  # intentionat larg: instanta poate fi inca blocata
+            log.debug("Eliberare %s: %s", app.name, describe_error(exc))
+        finally:
+            self._stop_cancelling(finished)
+            canceller.cancel()
+        app.reset()
