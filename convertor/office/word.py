@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from ..core import ExportOptions, Job, Kind
@@ -40,6 +41,20 @@ class WordApp(OfficeApp):
             raise
         # dupa un timeout, Word tocmai a marcat fisierul la care l-am oprit
         ResiliencyCleaner.clean()
+
+    def _window_handle(self) -> int | None:
+        # Word nu are Application.Hwnd, iar la pornire nu are niciun document (deci nici
+        # ActiveWindow). Fereastra lui principala exista insa, ascunsa (clasa OpusApp), cu
+        # titlul egal cu Application.Caption: ii dam pentru o clipa un titlu unic si o cautam.
+        # Titlul nu e salvat de Word, iar fereastra e invizibila.
+        import win32gui
+
+        original = self.app.Caption
+        self.app.Caption = f"convertor-{uuid.uuid4()}"
+        try:
+            return win32gui.FindWindow("OpusApp", self.app.Caption) or None
+        finally:
+            self.app.Caption = original
 
     def configure(self) -> None:
         self.app.Visible = False

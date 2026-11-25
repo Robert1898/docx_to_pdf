@@ -164,6 +164,9 @@ class ExcelApp(OfficeApp):
         self.open_workbooks = 0  # registrele deschise acum de noi in aceasta instanta
         self._remote_requests: bool | None = None  # valoarea initiala, cat timp e schimbata
 
+    def _window_handle(self) -> int | None:
+        return int(self.app.Hwnd)  # fereastra principala, exista si cand Excel e ascuns
+
     def configure(self) -> None:
         self.app.Visible = False
         self.app.DisplayAlerts = False

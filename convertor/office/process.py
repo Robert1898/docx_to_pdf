@@ -28,6 +28,13 @@ def _pids(image: str) -> set[int]:
     return pids
 
 
+def _pid_of_window(hwnd: int) -> int | None:
+    """Procesul care detine fereastra; None daca fereastra nu (mai) exista."""
+    import win32process
+
+    return win32process.GetWindowThreadProcessId(hwnd)[1] or None
+
+
 def _kill(pid: int) -> None:
     try:
         os.kill(pid, signal.SIGTERM)  # pe Windows: TerminateProcess

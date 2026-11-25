@@ -21,6 +21,8 @@ class PowerPointApp(OfficeApp):
     progid = "PowerPoint.Application"
     image = "POWERPNT.EXE"
     name = "Microsoft PowerPoint"
+    # Application.HWND e marcat „restricted” si da „Member not found” cat timp PowerPoint nu
+    # are fereastra vizibila, deci pid-ul vine din tasklist (_window_handle ramane None).
 
     def configure(self) -> None:
         # PowerPoint nu poate fi ascuns; prezentarile se deschid insa fara fereastra
