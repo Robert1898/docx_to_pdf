@@ -58,11 +58,11 @@ def _fake_scripts(monkeypatch: pytest.MonkeyPatch, read: dict, pressed: str = ""
     calls: list[tuple[str, tuple[str, ...]]] = []
 
     def run(script: str, *args: str) -> dict:
-        kind = "read" if script is office._READ_DIALOG_PS else "press"
+        kind = "read" if script is office.dialogs._READ_DIALOG_PS else "press"
         calls.append((kind, args))
         return read if kind == "read" else {"button": pressed}
 
-    monkeypatch.setattr(office, "_run_dialog_script", run)
+    monkeypatch.setattr(office.dialogs, "_run_dialog_script", run)
     return calls
 
 
@@ -97,7 +97,7 @@ def test_answer_dialog_unreadable(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(script: str, *args: str) -> dict:
         raise OSError("powershell lipseste")
 
-    monkeypatch.setattr(office, "_run_dialog_script", fail)
+    monkeypatch.setattr(office.dialogs, "_run_dialog_script", fail)
     assert office.answer_dialog(1) is None
 
 
@@ -105,8 +105,8 @@ def test_watcher_logs_unanswered_dialog(monkeypatch: pytest.MonkeyPatch,
                                         caplog: pytest.LogCaptureFixture) -> None:
     answers = {1: ("Îl deschideți oricum?", ["Da", "Nu"], "Da"),
                2: ("Ceva neașteptat", ["Nu", "Anulare"], None)}
-    monkeypatch.setattr(office, "_visible_dialogs", lambda pid: [1, 2])
-    monkeypatch.setattr(office, "answer_dialog", answers.get)
+    monkeypatch.setattr(office.dialogs, "_visible_dialogs", lambda pid: [1, 2])
+    monkeypatch.setattr(office.dialogs, "answer_dialog", answers.get)
     watcher = office.DialogWatcher(pid=123, interval=0.01)
     with caplog.at_level(logging.WARNING, logger="convertor.office"):
         watcher.start()

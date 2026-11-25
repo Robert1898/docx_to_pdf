@@ -58,13 +58,13 @@ class FakeExcel:
 def process(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Inregistreaza deschiderea handle-ului si asteptarea/oprirea procesului."""
     calls: list[str] = []
-    monkeypatch.setattr(office, "_open_process", lambda pid: calls.append(f"open {pid}") or 99)
+    monkeypatch.setattr(office.base, "_open_process", lambda pid: calls.append(f"open {pid}") or 99)
 
     def wait(handle: int, seconds: float) -> bool:
         calls.append(f"wait {handle}")
         return False
 
-    monkeypatch.setattr(office, "_wait_or_terminate", wait)
+    monkeypatch.setattr(office.base, "_wait_or_terminate", wait)
     return calls
 
 

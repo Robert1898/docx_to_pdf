@@ -330,7 +330,7 @@ def test_excel_started_by_the_app_is_gone_after_conversion(samples, tmp_path: Pa
     """Dupa Quit, Excel ramane uneori inca ~60 s in memorie (dupa un export in PDF). Aplicatia
     trebuie sa lase in urma zero procese EXCEL.EXE pornite de ea, imediat ce lotul s-a terminat.
     Intarzierea e intermitenta, de aceea conversia se repeta de cateva ori."""
-    from convertor.office import _pids
+    from convertor.office.process import _pids
 
     if "xlsx" not in samples:
         pytest.skip("Excel nu e instalat")

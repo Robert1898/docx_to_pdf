@@ -289,7 +289,13 @@ venv nou: `pip install --require-hashes -r requirements.lock`, ruff și testele 
 convertor/
   core.py         tipuri de fișiere, opțiuni, nume pentru rezultate
   engine.py       rulează un lot de conversii (folosit de GUI și CLI)
-  office.py       Word / Excel / PowerPoint prin COM, limită de timp, curățenie în registry
+  office/         Word / Excel / PowerPoint prin COM:
+    session.py    aplicațiile unui lot, limita de timp per fișier
+    base.py       erorile pentru utilizator și aplicația Office generică
+    word.py, excel.py, powerpoint.py   conversia propriu-zisă pentru fiecare aplicație
+    dialogs.py    răspunsul la dialogurile ascunse (lista albă de butoane)
+    registry.py   setările Word atinse temporar, curățenia după oprire
+    process.py    găsirea, așteptarea și oprirea proceselor Office
   libreoffice.py  alternativa fără Office
   pdflayout.py    PDF → DOCX cu aspect fidel (rânduri, coloane, chenare, imagini)
   pdftable.py     PDF → Excel (coloane, numere, date)
