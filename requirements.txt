@@ -5,5 +5,5 @@ tkinterdnd2>=0.4    # drag & drop din Explorer
 pypdf>=5.0          # unire, impartire, parola, watermark
 pycryptodome>=3.20  # criptare AES-256 pentru PDF-urile cu parola (mai mica decat cryptography)
 reportlab>=4.0      # textul pentru watermark
-pypdfium2>=4.30     # randarea paginilor pentru OCR
+pypdfium2>=5.15.2     # randarea paginilor pentru OCR
 Pillow>=10.0        # imagini (OCR, make_icon.py)
