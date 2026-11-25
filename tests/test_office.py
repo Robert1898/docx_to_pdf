@@ -386,13 +386,7 @@ def test_powerpoint_with_a_user_presentation_is_left_running(samples, tmp_path: 
 def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
         samples, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """La timeout, o instanta care nu poate fi oprita (documente straine) ramane pornita, dar
-    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza.
-
-    Excel ramane ocupat cu apelul anulat si refuza refacerea lui IgnoreRemoteRequests
-    (VBA_E_IGNORE); cand iese, il salveaza. Testul reface la final setarea globala."""
-    import pythoncom
-    import win32com.client
-
+    apelul nostru blocat e anulat din firul timer-ului (CoCancelCall), iar fisierul esueaza."""
     from convertor.office import ConversionTimeout, ExcelApp, OfficeSession
     from convertor.office.process import _kill, _pids
 
@@ -405,43 +399,62 @@ def test_blocked_call_is_cancelled_when_the_instance_must_not_be_stopped(
     monkeypatch.setattr(ExcelApp, "convert", blocked)
     monkeypatch.setattr(ExcelApp, "has_foreign_documents", lambda self: True)
     [job] = plan_jobs([samples["xlsx"]], tmp_path / "out")
-    pid = original = None
+    pid = None
     try:
         with OfficeSession() as session:
             app = session._app(ExcelApp)
             app.ensure()
-            pid, original = app.pid, app._remote_requests
+            pid = app.pid
             start = time.monotonic()
             with pytest.raises(ConversionTimeout, match="documente deschise de utilizator"):
                 session.convert(job, ExportOptions(timeout=2))
             assert time.monotonic() - start < 15
             assert app.app is None
+            assert pid in _pids("EXCEL.EXE")  # nu a fost oprit
     finally:
         if pid is not None:
-            # fara registre si fara referinte, Excel iese singur (si isi salveaza setarile)
+            # fara registre si fara referinte, Excel iese singur dupa ce se termina asteptarea
             deadline = time.time() + 45
             while pid in _pids("EXCEL.EXE") and time.time() < deadline:
                 time.sleep(0.5)
             if pid in _pids("EXCEL.EXE"):
                 _kill(pid)  # pornit de test
-    pythoncom.CoInitialize()
-    try:
-        before = _pids("EXCEL.EXE")
-        fresh = win32com.client.DispatchEx("Excel.Application")
-        new = _pids("EXCEL.EXE") - before
+
+
+def test_excel_global_dde_setting_is_never_changed(samples, tmp_path: Path) -> None:
+    """IgnoreRemoteRequests e globala si Excel o salveaza la iesire: dupa o conversie, un Excel
+    nou trebuie sa citeasca aceeasi valoare ca inainte."""
+    import pythoncom
+    import win32com.client
+
+    from convertor.office.process import _kill, _pids
+
+    if "xlsx" not in samples:
+        pytest.skip("Excel nu e instalat")
+
+    def read_setting() -> bool:
+        pythoncom.CoInitialize()
         try:
-            if bool(fresh.IgnoreRemoteRequests) != original:
-                fresh.IgnoreRemoteRequests = original  # salvat la iesirea curata de mai jos
+            before = _pids("EXCEL.EXE")
+            excel = win32com.client.DispatchEx("Excel.Application")
+            new = _pids("EXCEL.EXE") - before
+            try:
+                return bool(excel.IgnoreRemoteRequests)
+            finally:
+                excel.Quit()
+                excel = None
+                deadline = time.time() + 20
+                while _pids("EXCEL.EXE") & new and time.time() < deadline:
+                    time.sleep(0.2)
+                for left in _pids("EXCEL.EXE") & new:
+                    _kill(left)  # pornit de test
         finally:
-            fresh.Quit()
-            fresh = None
-            deadline = time.time() + 20
-            while _pids("EXCEL.EXE") & new and time.time() < deadline:
-                time.sleep(0.2)
-            for left in _pids("EXCEL.EXE") & new:
-                _kill(left)  # pornit de test
-    finally:
-        pythoncom.CoUninitialize()
+            pythoncom.CoUninitialize()
+
+    original = read_setting()
+    [result] = run([samples["xlsx"]], tmp_path)
+    assert result.status is Status.DONE, result.message
+    assert read_setting() == original
 
 
 def test_visible_excel_window_counts_as_foreign_work(samples) -> None:

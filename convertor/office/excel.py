@@ -163,7 +163,6 @@ class ExcelApp(OfficeApp):
     def __init__(self) -> None:
         super().__init__()
         self.open_workbooks = 0  # registrele deschise acum de noi in aceasta instanta
-        self._remote_requests: bool | None = None  # valoarea initiala, cat timp e schimbata
         self.foreign_seen = False  # ultima numaratoare (COM) a gasit registre straine
 
     def _window_handle(self) -> int | None:
@@ -178,22 +177,6 @@ class ExcelApp(OfficeApp):
         self.app.AutomationSecurity = MSO_AUTOMATION_SECURITY_FORCE_DISABLE
         self.open_workbooks = 0
         self.foreign_seen = False
-        if self.owned:
-            # Altfel un fisier deschis de utilizator din Explorer (DDE) poate ajunge in instanta
-            # noastra ascunsa. Setarea e globala si Excel o salveaza in registry la iesire, deci
-            # o refacem inainte de Quit; oprit fortat, Excel nu mai apuca sa o salveze.
-            self._remote_requests = bool(self.app.IgnoreRemoteRequests)
-            self.app.IgnoreRemoteRequests = True
-
-    def _restore_remote_requests(self) -> None:
-        if self._remote_requests is None:
-            return
-        try:
-            self.app.IgnoreRemoteRequests = self._remote_requests
-        except Exception as exc:  # intentionat larg: aplicatia poate fi deja moarta
-            log.debug("IgnoreRemoteRequests %s: %s", self.name, describe_error(exc))
-        finally:
-            self._remote_requests = None
 
     def has_foreign_documents(self) -> bool:
         # Fara COM (apelat din alt fir, cat timp Excel poate fi blocat): instanta noastra e
@@ -204,23 +187,21 @@ class ExcelApp(OfficeApp):
         return bool(self.pid) and bool(_visible_windows(self.pid, {"XLMAIN"}))
 
     def release_abandoned(self) -> None:
-        # IgnoreRemoteRequests e globala si Excel o salveaza cand iese singur (de ex. cand
-        # utilizatorul isi inchide registrul): o refacem, iar registrele straine raman la vedere.
+        # registrele straine raman la vedere, in grija utilizatorului
         self.prepare_quit()
 
     def prepare_quit(self) -> bool:
-        """Reface IgnoreRemoteRequests; refuza inchiderea daca instanta are registre straine.
+        """Refuza inchiderea daca instanta are registre straine.
 
-        Un registru deschis de altcineva (de ex. de utilizator, inainte sa ignoram cererile
-        DDE) nu are voie sa fie pierdut: cu DisplayAlerts = False, Quit l-ar inchide fara sa
-        intrebe si fara sa-l salveze, iar oprirea fortata la fel. Instanta e facuta vizibila
-        si lasata utilizatorului, care o inchide singur."""
+        Un registru deschis de altcineva in instanta noastra nu are voie sa fie pierdut: cu
+        DisplayAlerts = False, Quit l-ar inchide fara sa intrebe si fara sa-l salveze, iar
+        oprirea fortata la fel. Instanta e facuta vizibila si lasata utilizatorului, care o
+        inchide singur."""
         try:
             count = int(self.app.Workbooks.Count)
         except Exception as exc:  # intentionat larg: aplicatia poate fi deja moarta
             log.debug("Workbooks.Count %s: %s", self.name, describe_error(exc))
             count = 0
-        self._restore_remote_requests()
         foreign = count - self.open_workbooks
         if foreign <= 0:
             return True

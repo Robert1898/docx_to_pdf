@@ -1,4 +1,4 @@
-"""Inchiderea instantei Excel: IgnoreRemoteRequests refacut si registrele straine pastrate
+"""Inchiderea instantei Excel: registrele straine pastrate, fara oprire fortata peste ele
 (obiect COM simulat, fara Office)."""
 
 from __future__ import annotations
@@ -35,15 +35,14 @@ class FakeWorkbooks(SimpleNamespace):
 
 
 class FakeExcel:
-    """Excel.Application simulat: tine minte valoarea IgnoreRemoteRequests la Quit."""
+    """Excel.Application simulat: inregistreaza Quit-urile."""
 
-    def __init__(self, ignore_remote: bool = False, workbooks: int = 0,
-                 count_fails: bool = False, close_fails: bool = False) -> None:
-        self.IgnoreRemoteRequests = ignore_remote
+    def __init__(self, workbooks: int = 0, count_fails: bool = False,
+                 close_fails: bool = False) -> None:
         self.Visible = self.UserControl = False
         self.Workbooks = FakeWorkbooks(Count=workbooks, excel=self, close_fails=close_fails)
         self.count_fails = count_fails
-        self.quit_calls: list[bool] = []  # IgnoreRemoteRequests in momentul fiecarui Quit
+        self.quit_calls: list[str] = []
         self.seen_open: list[int] = []
 
     def __getattribute__(self, name: str):
@@ -51,8 +50,13 @@ class FakeExcel:
             raise OSError("RPC server unavailable")
         return object.__getattribute__(self, name)
 
+    def __setattr__(self, name: str, value: object) -> None:
+        # setare globala, salvata de Excel la iesire: aplicatia nu are voie sa o schimbe
+        assert name != "IgnoreRemoteRequests", "IgnoreRemoteRequests nu se atinge"
+        super().__setattr__(name, value)
+
     def Quit(self) -> None:
-        self.quit_calls.append(self.IgnoreRemoteRequests)
+        self.quit_calls.append("quit")
 
 
 @pytest.fixture
@@ -76,14 +80,11 @@ def excel_app(fake: FakeExcel, owned: bool = True) -> office.ExcelApp:
     return app
 
 
-@pytest.mark.parametrize("original", [False, True])
-def test_remote_requests_ignored_while_running_and_restored_before_quit(
-        process: list[str], original: bool) -> None:
-    fake = FakeExcel(ignore_remote=original)
+def test_our_instance_is_quit_and_awaited(process: list[str]) -> None:
+    fake = FakeExcel()
     app = excel_app(fake)
-    assert fake.IgnoreRemoteRequests is True  # instanta ascunsa nu primeste fisiere din Explorer
     app.quit()
-    assert fake.quit_calls == [original]  # refacut inainte de Quit, nu dupa
+    assert fake.quit_calls == ["quit"]
     assert process == ["open 1234", "wait 99"]
     assert app.app is None
 
@@ -91,7 +92,6 @@ def test_remote_requests_ignored_while_running_and_restored_before_quit(
 def test_instance_not_started_by_us_is_left_alone(process: list[str]) -> None:
     fake = FakeExcel()
     app = excel_app(fake, owned=False)
-    assert fake.IgnoreRemoteRequests is False
     app.quit()
     assert fake.quit_calls == []
     assert process == []
@@ -106,7 +106,6 @@ def test_foreign_workbook_keeps_excel_alive(process: list[str],
         app.quit()
     assert fake.quit_calls == []  # Quit cu DisplayAlerts = False l-ar inchide nesalvat
     assert process == []  # nici oprit fortat
-    assert fake.IgnoreRemoteRequests is False  # setarea globala e refacuta oricum
     assert (fake.Visible, fake.UserControl, fake.DisplayAlerts) == (True, True, True)
     assert "1 registru(e) deschis(e) de altcineva" in caplog.text
     assert app.app is None
@@ -146,7 +145,7 @@ def test_own_open_workbook_is_not_foreign(process: list[str]) -> None:
     fake.Workbooks.Count = 1
     app.open_workbooks = 1  # Close a esuat: registrul e tot al nostru
     app.quit()
-    assert fake.quit_calls == [False]
+    assert fake.quit_calls == ["quit"]
     assert process == ["open 1234", "wait 99"]
 
 
@@ -155,7 +154,7 @@ def test_unreadable_workbook_count_still_quits(process: list[str]) -> None:
     app = excel_app(fake)
     fake.count_fails = True
     app.quit()
-    assert fake.quit_calls == [False]
+    assert fake.quit_calls == ["quit"]
 
 
 def test_timed_out_instance_is_not_quit(process: list[str]) -> None:
@@ -242,7 +241,6 @@ def test_timeout_with_foreign_workbook_fails_the_file_but_keeps_excel(
     assert blocked.killed == []
     assert fake.closed is False  # fara Close in Excel-ul blocat
     assert fake.quit_calls == []
-    assert fake.IgnoreRemoteRequests is False  # setarea globala refacuta inainte de abandon
     assert app.app is None
     assert "are documente deschise de altcineva" in caplog.text
 
@@ -268,7 +266,6 @@ def test_abort_with_foreign_workbook_cancels_the_blocked_call(blocked: SimpleNam
     assert not worker.is_alive()
     assert [type(e) for e in errors] == [office.ConversionTimeout]
     assert blocked.killed == []
-    assert fake.IgnoreRemoteRequests is False
     # registrul strain ramane la vedere, in grija utilizatorului
     assert (fake.Visible, fake.UserControl) == (True, True)
 
