@@ -11,3 +11,4 @@ coverage.xml
 # SBOM (release.yml)
 .sbom-venv/
 .sbom-pyproject.toml
+*.egg-info/

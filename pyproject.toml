@@ -1,9 +1,15 @@
+[build-system]
+# setuptools 77+: licenta ca expresie SPDX (PEP 639)
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "document-converter"
 dynamic = ["version"]
 description = "Document Converter: documente Office în PDF, PDF în DOCX, plus unelte PDF"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Robert-Raul Mîrza" }]
 requires-python = ">=3.11"
 dependencies = [
