@@ -11,6 +11,8 @@ import pytest
 from convertor import watch
 from convertor.engine import Result, Status
 
+from .helpers import wait_until
+
 
 def _doc(folder: Path, name: str = "a.docx", data: bytes = b"x") -> Path:
     folder.mkdir(parents=True, exist_ok=True)
@@ -201,7 +203,8 @@ def test_folder_watcher_converts_new_files(tmp_path: Path) -> None:
     assert received[0].dst.parent == watch.default_output(folder_in)
 
 
-def test_folder_watcher_retries_and_gives_up(tmp_path: Path) -> None:
+def test_folder_watcher_retries_and_gives_up(tmp_path: Path,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
     folder_in = tmp_path / "in"
     doc = _doc(folder_in)
     calls: list[str] = []
@@ -216,13 +219,23 @@ def test_folder_watcher_retries_and_gives_up(tmp_path: Path) -> None:
         gave_up.append((path, error))
         finished.set()
 
+    scans: list[int] = []
+    real_ready_files = watch.ready_files
+
+    def counted_ready_files(*args, **kwargs):
+        scans.append(1)
+        return real_ready_files(*args, **kwargs)
+
+    monkeypatch.setattr(watch, "ready_files", counted_ready_files)
     watcher = watch.FolderWatcher(folder_in, watch.default_output(folder_in), convert,
                                   interval=0.02, on_give_up=on_give_up, retry_delay=0)
     watcher.state = watch.WatchState(tmp_path / "state.json", retry_delay=0)
     watcher.start()
     try:
         assert finished.wait(5)
-        threading.Event().wait(0.3)  # cateva verificari in plus: nu mai trebuie reluat
+        # cateva verificari ale folderului in plus (numarate, nu un timp fix): nu mai e reluat
+        after_give_up = len(scans)
+        assert wait_until(lambda: len(scans) >= after_give_up + 5)
     finally:
         watcher.stop()
         watcher.join(2)

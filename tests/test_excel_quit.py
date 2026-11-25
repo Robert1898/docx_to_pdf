@@ -13,6 +13,8 @@ import pytest
 from convertor import office
 from convertor.core import ExportOptions, Job, Kind
 
+from .helpers import wait_until
+
 
 class FakeWorkbook:
     def __init__(self, excel: FakeExcel, close_fails: bool = False) -> None:
@@ -201,6 +203,7 @@ def blocked(monkeypatch: pytest.MonkeyPatch, process: list[str]) -> SimpleNamesp
 
 class BlockingWorkbook(FakeWorkbook):
     def ExportAsFixedFormat(self, **kwargs) -> None:
+        self.excel.exporting = True
         assert self.excel.release.wait(5), "apelul nu a fost anulat"
         raise OSError("Call was canceled by the message filter.")
 
@@ -212,7 +215,7 @@ class BlockingWorkbook(FakeWorkbook):
 class BlockingExcel(FakeExcel):
     def __init__(self, release: threading.Event, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.release, self.closed = release, False
+        self.release, self.closed, self.exporting = release, False, False
         self.Workbooks.Open = lambda **kw: self._open()
 
     def _open(self) -> BlockingWorkbook:
@@ -259,8 +262,8 @@ def test_abort_with_foreign_workbook_cancels_the_blocked_call(blocked: SimpleNam
 
     worker = threading.Thread(target=run)
     worker.start()
-    while session._current is None and worker.is_alive():
-        threading.Event().wait(0.01)
+    # firul e blocat in export (dupa numaratoarea registrelor), nu doar intrat in conversie
+    assert wait_until(lambda: fake.exporting)
     session.kill_all()
     worker.join(5)
     assert not worker.is_alive()

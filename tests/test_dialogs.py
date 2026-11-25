@@ -8,6 +8,8 @@ import pytest
 
 from convertor import office
 
+from .helpers import wait_until
+
 
 @pytest.mark.parametrize(("buttons", "expected"), [
     (["Da", "Nu"], "Da"),
@@ -110,9 +112,14 @@ def test_watcher_logs_unanswered_dialog(monkeypatch: pytest.MonkeyPatch,
     watcher = office.DialogWatcher(pid=123, interval=0.01)
     with caplog.at_level(logging.WARNING, logger="convertor.office"):
         watcher.start()
-        watcher.join(0.2)
-        watcher.stop()
-        watcher.join(1)
+        try:
+            # asteptam ambele dialoguri, nu un timp fix: pe un runner lent, oprirea dupa 0,2 s
+            # putea veni intre primul si al doilea dialog
+            assert wait_until(lambda: watcher.answers and watcher.unanswered)
+        finally:
+            watcher.stop()
+            watcher.join(5)
+        assert not watcher.is_alive()
     assert watcher.answers == ["Îl deschideți oricum?"]
     assert watcher.unanswered == ["Ceva neașteptat"]
     assert watcher.last_text == "Ceva neașteptat"

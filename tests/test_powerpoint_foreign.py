@@ -13,6 +13,8 @@ import pytest
 from convertor import office
 from convertor.core import ExportOptions, Job, Kind
 
+from .helpers import wait_until
+
 
 class FakePresentation:
     def __init__(self, ppt: FakePowerPoint) -> None:
@@ -225,9 +227,7 @@ def test_abort_with_foreign_presentation_cancels_the_blocked_call(
 
     worker = threading.Thread(target=run)
     worker.start()
-    deadline = threading.Event()
-    while "export" not in fake.calls and not deadline.wait(0.01):
-        pass
+    assert wait_until(lambda: "export" in fake.calls)  # firul e blocat in export
     session.kill_all()  # Anulare / inchiderea aplicatiei, din alt fir
     worker.join(5)
     assert not worker.is_alive()  # firul nu mai e blocat

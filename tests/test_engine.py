@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -11,6 +10,8 @@ from reportlab.pdfgen import canvas
 
 from convertor import engine
 from convertor.core import ExportOptions, plan_jobs
+
+from .helpers import wait_until
 
 
 class FakeSession:
@@ -60,8 +61,8 @@ def test_pool_grows_for_large_batches(fake_office: type[FakeSession]) -> None:
     try:
         futures = [pool.submit(lambda s: (gate.wait(5), threading.current_thread().name))
                    for _ in range(engine.JOBS_PER_WORKER * 3)]
-        time.sleep(0.2)
-        assert len(fake_office.instances) == 3
+        # firele isi creeaza sesiunea dupa pornire: asteptam, nu un timp fix
+        assert wait_until(lambda: len(fake_office.instances) == 3)
         gate.set()
         for future in futures:
             future.result(5)
@@ -93,9 +94,7 @@ def test_on_idle_only_when_the_batch_is_done(fake_office: type[FakeSession]) -> 
         for future in [first, *rest]:
             future.result(5)
         session = fake_office.instances[0]
-        deadline = time.time() + 5
-        while session.idle_calls == 0 and time.time() < deadline:
-            time.sleep(0.02)
+        assert wait_until(lambda: session.idle_calls > 0)
         assert seen == [0, 0, 0]  # nu intre fisierele aceluiasi lot
         assert session.idle_calls == 1
     finally:
@@ -105,10 +104,7 @@ def test_on_idle_only_when_the_batch_is_done(fake_office: type[FakeSession]) -> 
 def test_idle_workers_close_office(fake_office: type[FakeSession]) -> None:
     pool = engine.OfficePool(1, idle_timeout=0.1)
     pool.submit(lambda s: None).result(5)
-    deadline = time.time() + 5
-    while not fake_office.instances[0].closed and time.time() < deadline:
-        time.sleep(0.02)
-    assert fake_office.instances[0].closed
+    assert wait_until(lambda: fake_office.instances[0].closed)
     pool.close()
 
 
